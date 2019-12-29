@@ -14,8 +14,9 @@ use meta_data::MetaData;
 
 mod rc_state;
 use rc_state::RCState;
+mod controller_state;
+use controller_state::ControllerState;
 
-#[macro_use]
 extern crate gstreamer as gst;
 use gst::prelude::*;
 
@@ -23,7 +24,7 @@ extern crate glib;
 #[derive(Debug)]
 struct MissingElement(&'static str);
 
-use std::io::{Cursor, Read};
+use std::io::{Cursor};
 
 fn enable(socket: &UdpSocket) -> usize {
     println!("enable");
@@ -75,132 +76,6 @@ fn video_off(socket: &UdpSocket) -> usize {
 //     let command = format!("ccw {}", step);
 //     socket.send(&command.into_bytes()).unwrap()
 // }
-
-#[derive(Clone, Debug)]
-struct ControllerState {
-    a_down: bool,
-    d_down: bool,
-    w_down: bool,
-    s_down: bool,
-    up_down: bool,
-    down_down: bool,
-    left_down: bool,
-    right_down: bool,
-}
-
-impl ControllerState {
-    fn new() -> ControllerState {
-        ControllerState {
-            a_down: false,
-            d_down: false,
-            w_down: false,
-            s_down: false,
-            up_down: false,
-            down_down: false,
-            left_down: false,
-            right_down: false,
-        }
-    }
-
-    fn key_down(self: &ControllerState, keycode: Keycode) -> ControllerState {
-        match keycode {
-            Keycode::A => {
-                let mut n_cs = self.clone();
-                n_cs.d_down = false;
-                n_cs.a_down = true;
-                return n_cs
-            }
-            Keycode::D => {
-                let mut n_cs = self.clone();
-                n_cs.a_down = false;
-                n_cs.d_down = true;
-                return n_cs
-            }
-            Keycode::W => {
-                let mut n_cs = self.clone();
-                n_cs.s_down = false;
-                n_cs.w_down = true;
-                return n_cs
-            }
-            Keycode::S => {
-                let mut n_cs = self.clone();
-                n_cs.w_down = false;
-                n_cs.s_down = true;
-                return n_cs
-            }
-            Keycode::Up => {
-                let mut n_cs = self.clone();
-                n_cs.down_down = false;
-                n_cs.up_down = true;
-                return n_cs
-            }
-            Keycode::Down => {
-                let mut n_cs = self.clone();
-                n_cs.up_down = false;
-                n_cs.down_down = true;
-                return n_cs
-            }
-            Keycode::Left => {
-                let mut n_cs = self.clone();
-                n_cs.right_down = false;
-                n_cs.left_down = true;
-                return n_cs
-            }
-            Keycode::Right => {
-                let mut n_cs = self.clone();
-                n_cs.left_down = false;
-                n_cs.right_down = true;
-                return n_cs
-            }
-            _ => self.clone()
-        }
-    }
-    fn key_up(self: &ControllerState, keycode: Keycode) -> ControllerState {
-        match keycode {
-            Keycode::A => {
-                let mut n_cs = self.clone();
-                n_cs.a_down = false;
-                return n_cs
-            }
-            Keycode::D => {
-                let mut n_cs = self.clone();
-                n_cs.d_down = false;
-                return n_cs
-            }
-            Keycode::W => {
-                let mut n_cs = self.clone();
-                n_cs.w_down = false;
-                return n_cs
-            }
-            Keycode::S => {
-                let mut n_cs = self.clone();
-                n_cs.s_down = false;
-                return n_cs
-            }
-            Keycode::Up => {
-                let mut n_cs = self.clone();
-                n_cs.up_down = false;
-                return n_cs
-            }
-            Keycode::Down => {
-                let mut n_cs = self.clone();
-                n_cs.down_down = false;
-                return n_cs
-            }
-            Keycode::Left => {
-                let mut n_cs = self.clone();
-                n_cs.left_down = false;
-                return n_cs
-            }
-            Keycode::Right => {
-                let mut n_cs = self.clone();
-                n_cs.right_down = false;
-                return n_cs
-            }
-            _ => self.clone()
-        }
-    }
-}
 
 fn update_rc_state(rc_state: RCState, c_state: &ControllerState) -> RCState {
     let mut new_rc_state = rc_state.clone();
@@ -281,9 +156,9 @@ fn main() -> Result<(), String> {
 
     gst::init().unwrap();
     //gst-launch-1.0 shmsrc socket-path=/tmp/blah ! "video/x-raw, format=YUY2, color-matrix=sdtv, chroma-site=mpeg2, width=(int)320, height=(int)240, framerate=(fraction)30/1" ! queue ! videoconvert ! autovideosink
-    let pipeline = gst::Pipeline::new(None);
-    let src = gst::ElementFactory::make("shmsrc", None).map_err(|_| MissingElement("shmsrc")).unwrap();
-    let decodebin = gst::ElementFactory::make("decodebin", None).map_err(|_| MissingElement("decodebin")).unwrap();
+    let _pipeline = gst::Pipeline::new(None);
+    let _src = gst::ElementFactory::make("shmsrc", None).map_err(|_| MissingElement("shmsrc")).unwrap();
+    let _decodebin = gst::ElementFactory::make("decodebin", None).map_err(|_| MissingElement("decodebin")).unwrap();
 
     canvas.set_draw_color(Color::RGB(0, 255, 255));
     canvas.clear();
@@ -384,7 +259,7 @@ fn main() -> Result<(), String> {
         }
         if walker > 0 {
             let vec_data = video_buf.to_vec();
-            let mut cursor = Cursor::new(&vec_data);
+            let mut _cursor = Cursor::new(&vec_data);
             // match mp4::read_mp4(&mut cursor, &mut context) {
             //     Ok(_) => {
             //         println!("received stream size {} length {:?}", walker, context.timescale.unwrap());
