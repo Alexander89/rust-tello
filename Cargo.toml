@@ -9,8 +9,7 @@ edition = "2018"
 [dependencies]
 bytes = "0.4"
 byteorder = "1.1"
-crc8 = "0.1.1"
-crc16 = "0.4.0"
+chrono = "0.4.0"
 sdl2 = {version = "0.32", features = ["ttf"]}
 glib = "0.9"
 gstreamer = "0.15"

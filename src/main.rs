@@ -12,11 +12,13 @@ use std::ops::Deref;
 mod meta_data;
 use meta_data::MetaData;
 
+mod crc;
 mod command;
 mod rc_state;
 mod controller_state;
+mod drone_messages;
 
-use command::Command;
+use command::{Command, UdpCommand};
 use rc_state::RCState;
 use controller_state::ControllerState;
 
@@ -86,14 +88,28 @@ fn main() -> Result<(), String> {
     
     let mut canvas = window.into_canvas().build()
         .expect("could not make a canvas");
+
+    let ttf_context = sdl2::ttf::init().expect("could not initialize font subsystem");
+
+    let texture_creator = canvas.texture_creator();
+    let font_path: &Path = Path::new("./DejaVuSans.ttf");
+    let font = ttf_context.load_font(font_path, 24).expect("load font");
+    let keys_target = Rect::new((WINDOW_WIDTH - 250) as i32, 0, 250, 200);
+    let key_text = "i: connect\nk: take_off\nl: land/cancel\nv: start/stop video";
         
     let mut event_pump = sdl_context.event_pump()?;
     let mut i = 0;
+    let mut land = false;
+    let mut video_on = false;
 
     'running: loop {
         i = (i + 1) % 255;
         canvas.set_draw_color(Color::RGB(i, 64, 255 - i));
         canvas.clear();
+
+        let surface = font.render(key_text).blended_wrapped(Color::RGB(0, 0, 0), 250).unwrap();
+        let texture = texture_creator.create_texture_from_surface(&surface).unwrap();
+        canvas.copy(&texture, None, Some(keys_target))?;
 
         for event in event_pump.poll_iter() {
             match event {
@@ -103,6 +119,29 @@ fn main() -> Result<(), String> {
                 },
                 Event::KeyDown { keycode: Some(Keycode::I), .. } => {
                     drone.connect(11111);
+                },
+                Event::KeyDown { keycode: Some(Keycode::K), .. } => {
+                    land = false;
+                    drone.take_off().unwrap();
+                },
+                Event::KeyDown { keycode: Some(Keycode::L), .. } => {
+                    if land == false {
+                        land = true;
+                        drone.land().unwrap();
+                    } else {
+                        land = false;
+                        drone.stop_land().unwrap();
+                    }
+                },
+                Event::KeyDown { keycode: Some(Keycode::V), .. } => {
+                    if video_on == false {
+                        video_on = true;
+                        drone.start_video().unwrap();
+                    } else {
+                        video_on = false;
+                        // @TODO unknown command for stop_video
+                        drone.start_video().unwrap();
+                    }
                 },
                 _ => {}
             }
