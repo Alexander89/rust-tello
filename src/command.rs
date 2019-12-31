@@ -20,6 +20,7 @@ pub const START_OF_PACKET: u8 = 0xcc;
 #[derive(Debug, Clone, Copy)]
 #[repr(u16)]
 pub enum CommandIds {
+    Undefined = 0x0000,
     SsidMsg = 0x0011,
     SsidCmd = 0x0012,
     SsidPasswordMsg = 0x0013,
@@ -124,7 +125,7 @@ impl From<u16> for CommandIds {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub enum ResponseMsg {
     Connected(String),
     UnknownCommand(CommandIds),
@@ -182,7 +183,6 @@ impl Command {
 
     pub fn send(&self, command: UdpCommand) -> Result {
         let data: Vec<u8> = command.into();
-        
         if self.socket.send(&data).is_ok() {
             Ok(())
         } else {
@@ -195,8 +195,12 @@ impl Command {
 
         if let Ok(received) = self.socket.recv(&mut meta_buf) {
             let data = meta_buf[..received].to_vec();
-            let data = Package::try_from(data);
-            println!("{:?}", data);
+            match Message::try_from(data) {
+                Ok(Message::data(d)) => println!("Data: {:?}", d),
+                Ok(Message::response(r)) => println!("Response : {:?}", r),
+                Err(e) => println!("Error {:?}", e),
+                _ => ()
+            }
         }
 
     }
@@ -231,11 +235,12 @@ impl Command {
         command.write_u16((now.nanosecond() >> 16) as u16 );
         command.write_u16((now.nanosecond() & 0xffff) as u16 );
 
+        let d: Vec<u8> = command.clone().into();
         self.send(command)
     }
 }
 
-
+#[derive(Debug, Clone)]
 pub struct UdpCommand{
     inner: Vec<u8>
 }
@@ -292,8 +297,8 @@ impl UdpCommand {
 impl Into<Vec<u8>> for UdpCommand {
     fn into(self) -> Vec<u8> {
         let mut cur = Cursor::new(self.inner);
+        cur.seek(SeekFrom::End(0)).unwrap();
         cur.write_u16::<LittleEndian>(crc16(cur.clone().into_inner())).expect("");
-        
         cur.into_inner()
     }
 }
@@ -306,7 +311,12 @@ pub struct Package {
     data: PackageData,
 }
 
-impl TryFrom<Vec<u8>> for Package {
+enum Message {
+    data(Package),
+    response(ResponseMsg)
+}
+
+impl TryFrom<Vec<u8>> for Message {
     type Error = &'static str;
 
     fn try_from(data: Vec<u8>) -> std::result::Result<Self, Self::Error>  {
@@ -321,7 +331,7 @@ impl TryFrom<Vec<u8>> for Package {
                 let mut data : Vec<u8>= Vec::with_capacity(size as usize);
                 cur.read_to_end(&mut data).unwrap();
                 match cmd {
-                    //CommandIds::FlightMsg => PackageData::FlightData(FlightData::from(data)),
+                    CommandIds::FlightMsg => PackageData::FlightData(FlightData::from(data)),
                     CommandIds::WifiMsg => PackageData::WifiInfo(WifiInfo::from(data)),
                     CommandIds::LightMsg => PackageData::LightInfo(LightInfo::from(data)),
                     //CommandIds::LogHeaderMsg => PackageData::LogMessage(LogMessage::from(data)),
@@ -331,31 +341,28 @@ impl TryFrom<Vec<u8>> for Package {
                 PackageData::NoData()
             };
 
-            Ok(Package {
+            Ok(Message::data(Package {
                 cmd,
                 size,
                 sq_nr,
                 data,
-            })
+            }))
+
         } else {
             let data = cur.into_inner();
-            if data[0..9] == b"conn_ack:" {
-                return Ok(ResponseMsg::Connected(String::from_utf8(data).unwrap())),
-            } else if data[0..16] == b"unknown command:" {
-                return Ok(Package {
-                    cmd: CommandIds::Undefined,
-                    size: data.len() as u16,
-                    sq_nr: 0,
-                    data: PackageData::ConnectAck(String::from_utf8(data).unwrap()),
-                })
-                data[17..]
+            if data[0..9].to_vec() == b"conn_ack:" {
+                return Ok(Message::response(ResponseMsg::Connected(String::from_utf8(data).unwrap())))
+            } else if data[0..16].to_vec() == b"unknown command:" {
+                println!("data {:?}", data[17..].to_vec());
+                let mut cur = Cursor::new(data[17..].to_owned());
+                let command = CommandIds::from(cur.read_u16::<LittleEndian>().unwrap().clone());
+                return Ok(Message::response(ResponseMsg::UnknownCommand(command)))
             }
             
-                unsafe {
-                    println!("data len {:?}", data.len());
-                    let msg = String::from_utf8_unchecked(data.clone()[0..16].to_vec());
-                    println!("data {:?}", msg);
-                }
+            unsafe {
+                println!("data len {:?}", data.len());
+                let msg = String::from_utf8_unchecked(data.clone()[0..16].to_vec());
+                println!("data {:?}", msg);
             }
             Err("invalid package")
         }
@@ -369,7 +376,7 @@ enum PackageData {
     WifiInfo(WifiInfo),
     LightInfo(LightInfo),
     LogMessage(LogMessage),
-    ConnectAck(String),
+    Response(ResponseMsg),
     NoData(),
     Unknown(),
 }
