@@ -26,102 +26,54 @@ impl ControllerState {
         }
     }
 
-    pub fn key_down(self: &ControllerState, keycode: Keycode) -> ControllerState {
+    pub fn key_down(&mut self, keycode: Keycode) {
         match keycode {
             Keycode::A => {
-                let mut n_cs = self.clone();
-                n_cs.d_down = false;
-                n_cs.a_down = true;
-                return n_cs
-            }
+                self.d_down = false;
+                self.a_down = true;
+            },
             Keycode::D => {
-                let mut n_cs = self.clone();
-                n_cs.a_down = false;
-                n_cs.d_down = true;
-                return n_cs
-            }
+                self.a_down = false;
+                self.d_down = true;
+            },
             Keycode::W => {
-                let mut n_cs = self.clone();
-                n_cs.s_down = false;
-                n_cs.w_down = true;
-                return n_cs
-            }
+                self.s_down = false;
+                self.w_down = true;
+            },
             Keycode::S => {
-                let mut n_cs = self.clone();
-                n_cs.w_down = false;
-                n_cs.s_down = true;
-                return n_cs
-            }
+                self.w_down = false;
+                self.s_down = true;
+            },
             Keycode::Up => {
-                let mut n_cs = self.clone();
-                n_cs.down_down = false;
-                n_cs.up_down = true;
-                return n_cs
-            }
+                self.down_down = false;
+                self.up_down = true;
+            },
             Keycode::Down => {
-                let mut n_cs = self.clone();
-                n_cs.up_down = false;
-                n_cs.down_down = true;
-                return n_cs
-            }
+                self.up_down = false;
+                self.down_down = true;
+            },
             Keycode::Left => {
-                let mut n_cs = self.clone();
-                n_cs.right_down = false;
-                n_cs.left_down = true;
-                return n_cs
-            }
+                self.right_down = false;
+                self.left_down = true;
+            },
             Keycode::Right => {
-                let mut n_cs = self.clone();
-                n_cs.left_down = false;
-                n_cs.right_down = true;
-                return n_cs
-            }
-            _ => self.clone()
+                self.left_down = false;
+                self.right_down = true;
+            },
+            _ => ()
         }
     }
-    pub fn key_up(self: &ControllerState, keycode: Keycode) -> ControllerState {
+    pub fn key_up(&mut self, keycode: Keycode) {
         match keycode {
-            Keycode::A => {
-                let mut n_cs = self.clone();
-                n_cs.a_down = false;
-                return n_cs
-            }
-            Keycode::D => {
-                let mut n_cs = self.clone();
-                n_cs.d_down = false;
-                return n_cs
-            }
-            Keycode::W => {
-                let mut n_cs = self.clone();
-                n_cs.w_down = false;
-                return n_cs
-            }
-            Keycode::S => {
-                let mut n_cs = self.clone();
-                n_cs.s_down = false;
-                return n_cs
-            }
-            Keycode::Up => {
-                let mut n_cs = self.clone();
-                n_cs.up_down = false;
-                return n_cs
-            }
-            Keycode::Down => {
-                let mut n_cs = self.clone();
-                n_cs.down_down = false;
-                return n_cs
-            }
-            Keycode::Left => {
-                let mut n_cs = self.clone();
-                n_cs.left_down = false;
-                return n_cs
-            }
-            Keycode::Right => {
-                let mut n_cs = self.clone();
-                n_cs.right_down = false;
-                return n_cs
-            }
-            _ => self.clone()
+            Keycode::A => self.a_down = false,
+            Keycode::D => self.d_down = false,
+            Keycode::W => self.w_down = false,
+            Keycode::S => self.s_down = false,
+            Keycode::Up => self.up_down = false,
+            Keycode::Down => self.down_down = false,
+            Keycode::Left => self.left_down = false,
+            Keycode::Right => self.right_down = false,
+            _ => ()
         }
     }
 }

@@ -18,7 +18,7 @@ mod rc_state;
 mod controller_state;
 mod drone_messages;
 
-use command::{Command, UdpCommand};
+use command::{Command, UdpCommand, Flip};
 use rc_state::RCState;
 use controller_state::ControllerState;
 
@@ -101,6 +101,9 @@ fn main() -> Result<(), String> {
     let mut i = 0;
     let mut land = false;
     let mut video_on = false;
+    let mut bounce_on = false;
+    let mut keyboard = ControllerState::new();
+    let mut rc_state = RCState::new();
 
     'running: loop {
         i = (i + 1) % 255;
@@ -110,6 +113,7 @@ fn main() -> Result<(), String> {
         let surface = font.render(key_text).blended_wrapped(Color::RGB(0, 0, 0), 250).unwrap();
         let texture = texture_creator.create_texture_from_surface(&surface).unwrap();
         canvas.copy(&texture, None, Some(keys_target))?;
+
 
         for event in event_pump.poll_iter() {
             match event {
@@ -143,13 +147,36 @@ fn main() -> Result<(), String> {
                         drone.start_video().unwrap();
                     }
                 },
+                Event::KeyDown { keycode: Some(Keycode::H), .. } => {
+                    if bounce_on == false {
+                        bounce_on = true;
+                        drone.bounce().unwrap();
+                    } else {
+                        bounce_on = false;
+                        drone.bounce_stop().unwrap();
+                    }
+                },
+
+                Event::KeyDown { keycode: Some(Keycode::T), .. } => drone.flip(Flip::ForwardLeft).unwrap(),
+                Event::KeyDown { keycode: Some(Keycode::Z), .. } => drone.flip(Flip::Forward).unwrap(),
+                Event::KeyDown { keycode: Some(Keycode::U), .. } => drone.flip(Flip::ForwardRight).unwrap(),
+                Event::KeyDown { keycode: Some(Keycode::G), .. } => drone.flip(Flip::Left).unwrap(),
+                Event::KeyDown { keycode: Some(Keycode::J), .. } => drone.flip(Flip::Right).unwrap(),
+                Event::KeyDown { keycode: Some(Keycode::B), .. } => drone.flip(Flip::BackLeft).unwrap(),
+                Event::KeyDown { keycode: Some(Keycode::N), .. } => drone.flip(Flip::Back).unwrap(),
+                Event::KeyDown { keycode: Some(Keycode::M), .. } => drone.flip(Flip::BackRight).unwrap(),
+
+                Event::KeyDown { keycode: Some(keycode), .. } => keyboard.key_down(keycode),
+                Event::KeyUp { keycode: Some(keycode), .. } => keyboard.key_up(keycode),
                 _ => {}
             }
         }
 
-
         drone.poll();
 
+        rc_state.update_rc_state(&keyboard);
+        rc_state.send_command(&drone);
+        
         canvas.present();
         ::std::thread::sleep(Duration::new(0, 1_000_000_000u32 / 20));
     }
