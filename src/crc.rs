@@ -21,7 +21,7 @@ const CRC8_TABLE: [u8; 256] = [
 pub fn crc8(pkt: impl IntoIterator<Item = u8>) -> u8 {
 	let mut crc: u8 = 0x77;
 	for i in pkt.into_iter() {
-		crc = CRC8_TABLE[((crc ^ i) & 0xff) as usize];
+		crc = CRC8_TABLE[(crc ^ i) as usize];
 	}
 
 	crc

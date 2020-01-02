@@ -5,9 +5,10 @@ use chrono::prelude::*;
 use crate::crc::{crc8, crc16};
 use crate::drone_messages::{FlightData, WifiInfo, LightInfo, LogMessage};
 use std::convert::TryFrom;
+use crate::rc_state::RCState;
 
 
-static mut SEQ_NO: u16 = 0;
+static mut SEQ_NO: u16 = 1;
 
 type Result = std::result::Result<(), ()>;
 
@@ -17,7 +18,7 @@ pub struct Command {
 
 pub const START_OF_PACKET: u8 = 0xcc;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 #[repr(u16)]
 pub enum CommandIds {
     Undefined = 0x0000,
@@ -129,16 +130,15 @@ impl From<u16> for CommandIds {
 pub enum ResponseMsg {
     Connected(String),
     UnknownCommand(CommandIds),
-    Unknown,
 }
 
 #[repr(u8)]
 pub enum PackageTypes {
-    X48ExpThrowFileCompl = 0x48,
-    X50Data = 0x50,
-    X60NoSqNo = 0x60,
-    X70Flip = 0x70,
-    X68Normal = 0x68,
+    X48 = 0x48,
+    X50 = 0x50,
+    X60 = 0x60,
+    X70 = 0x70,
+    X68 = 0x68,
 }
 
 //Flip commands taken from Go version of code
@@ -184,12 +184,20 @@ impl Command {
 
     pub fn send(&self, command: UdpCommand) -> Result {
         let data: Vec<u8> = command.into();
+        
         println!("send command {:?}", data.clone());
         if self.socket.send(&data).is_ok() {
             Ok(())
         } else {
             Err(())
         }
+    }
+
+
+    fn send_ack_log(&self, id: u16) -> Result {
+        let mut cmd = UdpCommand::new_with_zero_sqn(CommandIds::LogHeaderMsg, PackageTypes::X50, 2);
+        cmd.write_u16(id);
+        self.send(cmd)
     }
 
     pub fn poll(&self) -> Option<Message> {
@@ -200,21 +208,16 @@ impl Command {
             match Message::try_from(data) {
                 Ok(msg) => {
                     match msg.clone() {
-                        Message::Response(r) => {
-                            println!("Response : {:?}", r);
-                            if let ResponseMsg::Connected(_) = r {
-                                self.send_date_time().unwrap();
-                            }
-                        },
-                        Message::Data(d) => 
-                            println!("Data : {:?}", d)
-                        
-                    }
-                    return Some(msg)
+                        Message::Data(Package{data: PackageData::LogMessage(log), ..}) => 
+                            self.send_ack_log(log.id).unwrap(),
+                        Message::Data(Package{cmd, ..}) if cmd == CommandIds::TimeCmd =>
+                            self.send_date_time().unwrap(),
+                        _ => ()
+                    };
+                    Some(msg)
                 },
-                Err(e) => println!("Error {:?}", e),
+                Err(_e) => None
             }
-            None
         } else {
             None
         }
@@ -222,81 +225,147 @@ impl Command {
 }
 
 impl Command {
+    pub fn start_engines(&self, rc_state: &mut RCState) {
+        rc_state.start_engines();
+    }
+
     pub fn take_off(&self) -> Result {
-        self.send(UdpCommand::new(CommandIds::TakeoffCmd, PackageTypes::X68Normal, 0))
+        self.send(UdpCommand::new(CommandIds::TakeoffCmd, PackageTypes::X68, 0))
     }    
     pub fn land(&self) -> Result {
-        let mut command = UdpCommand::new(CommandIds::LandCmd, PackageTypes::X68Normal, 1);
+        let mut command = UdpCommand::new(CommandIds::LandCmd, PackageTypes::X68, 1);
         command.write_u8(0x00);
         self.send(command)
     }  
     pub fn stop_land(&self) -> Result {
-        let mut command = UdpCommand::new(CommandIds::LandCmd, PackageTypes::X68Normal, 1);
-        command.write_u8(0x01);
+        let mut command = UdpCommand::new(CommandIds::LandCmd, PackageTypes::X68, 1);
+        command.write_u8(0x00);
         self.send(command)
     }
     pub fn start_video(&self) -> Result {
-        self.send(UdpCommand::new_with_zero_sqn(CommandIds::VideoStartCmd, PackageTypes::X60NoSqNo, 0))
+        self.send(UdpCommand::new_with_zero_sqn(CommandIds::VideoStartCmd, PackageTypes::X60, 0))
     }
     pub fn flip(&self, direction: Flip) -> Result {
-        let mut cmd = UdpCommand::new(CommandIds::FlipCmd, PackageTypes::X70Flip, 1);
+        let mut cmd = UdpCommand::new_with_zero_sqn(CommandIds::FlipCmd, PackageTypes::X70, 1);
         cmd.write_u8(direction as u8);
         self.send(cmd)
     }
     pub fn bounce(&self) -> Result {
-        let mut cmd = UdpCommand::new(CommandIds::BounceCmd, PackageTypes::X68Normal, 1);
+        let mut cmd = UdpCommand::new(CommandIds::BounceCmd, PackageTypes::X68, 1);
         cmd.write_u8(0x30);
         self.send(cmd)
     }
     pub fn bounce_stop(&self) -> Result {
-        let mut cmd = UdpCommand::new(CommandIds::BounceCmd, PackageTypes::X68Normal, 1);
+        let mut cmd = UdpCommand::new(CommandIds::BounceCmd, PackageTypes::X68, 1);
         cmd.write_u8(0x31);
         self.send(cmd)
     }
+
+
+    pub fn get_version(&self) -> Result {
+        self.send(UdpCommand::new(CommandIds::VersionMsg, PackageTypes::X48, 0))
+    }
+    pub fn get_alt_limit(&self) -> Result {
+        self.send(UdpCommand::new(CommandIds::AltLimitMsg, PackageTypes::X48, 0))
+    }
+    pub fn set_alt_limit(&self) -> Result {
+        let mut cmd = UdpCommand::new(CommandIds::SetAltLimitCmd, PackageTypes::X68, 2);
+        cmd.write_u16(30);
+        self.send(cmd)
+    }
+    pub fn get_battery_threshold(&self) -> Result {
+        self.send(UdpCommand::new(CommandIds::LowBatThresholdCmd, PackageTypes::X48, 0))
+    }
+    pub fn set_battery_threshold(&self) -> Result {
+        let mut cmd = UdpCommand::new(CommandIds::LowBatThresholdCmd, PackageTypes::X68, 1);
+        cmd.write_u8(10);
+        self.send(cmd)
+    }
+    pub fn get_att_angle(&self) -> Result {
+        self.send(UdpCommand::new(CommandIds::AttLimitCmd, PackageTypes::X48, 0))
+    }
+    pub fn set_att_angle(&self) -> Result {
+        let mut cmd = UdpCommand::new(CommandIds::AttLimitCmd, PackageTypes::X68, 1);
+        cmd.write_u8(10);
+        self.send(cmd)
+    }
+    pub fn get_region(&self) -> Result {
+        self.send(UdpCommand::new(CommandIds::WifiRegionCmd, PackageTypes::X48, 0))
+    }
+    pub fn set_exposure(&self) -> Result {
+        let mut cmd = UdpCommand::new(CommandIds::ExposureCmd, PackageTypes::X48, 1);
+        cmd.write_u8(0);
+        self.send(cmd)
+    }
+    pub fn get_video_bitrate(&self) -> Result {
+        self.send(UdpCommand::new(CommandIds::VideoEncoderRateCmd, PackageTypes::X48, 0))
+    }
+
     // pitch up/down -1 -> 1
     // nick forward/backward -1 -> 1
     // roll right/left -1 -> 1
     // yaw cw/ccw -1 -> 1
     pub fn send_stick(&self, pitch: f32, nick: f32, roll: f32, yaw:f32, fast: bool) -> Result {
-        let mut cmd = UdpCommand::new_with_zero_sqn(CommandIds::BounceCmd, PackageTypes::X60NoSqNo, 11);
+        let mut cmd = UdpCommand::new_with_zero_sqn(CommandIds::StickCmd, PackageTypes::X60, 11);
                 
         // RightX center=1024 left =364 right =-364
-        let pitch_u = (660.0 * pitch + 1024.0) as u64;
+        let pitch_u = (1024.0 + 660.0 * pitch) as i64;
     
         // RightY down =364 up =-364
-        let nick_u = (660.0 * nick + 1024.0) as u64;
+        let nick_u = (1024.0 + 660.0 * nick) as i64;
     
         // LeftY down =364 up =-364
-        let roll_u = (660.0 * roll + 1024.0) as u64;
+        let roll_u = (1024.0 + 660.0 * roll) as i64;
     
         // LeftX left =364 right =-364
-        let yaw_u = (660.0 * yaw + 1024.0) as u64;
+        let yaw_u = (1024.0 + 660.0 * yaw) as i64;
     
         // speed control
-        let throttle_u = if fast { 1u64 } else { 0u64 };
-    
+        let throttle_u = if fast { 1i64 } else { 0i64 };
+        
         // create axis package
-        let packed_axis: u64 = (pitch_u & 0x7FF) | (nick_u & 0x7FF) << 11 | (roll_u & 0x7FF) << 22 | (yaw_u & 0x7FF) << 33 | throttle_u << 44;
-        cmd.write_u64(packed_axis);
+        let packed_axis: i64 = (roll_u & 0x7FF) | (nick_u & 0x7FF) << 11 | (pitch_u & 0x7FF) << 22 | (yaw_u & 0x7FF) << 33 | throttle_u << 44;
 
-        let cmd = Command::add_date_time(cmd);
+        // println!("p {:} n {:} r {:} y {:} t {:} => {:x}", pitch_u & 0x7FF, nick_u& 0x7FF, roll_u& 0x7FF, yaw_u& 0x7FF, throttle_u, packed_axis);
+
+        cmd.write_u8(((packed_axis      ) & 0xFF) as u8);
+        cmd.write_u8(((packed_axis >>  8) & 0xFF) as u8);
+        cmd.write_u8(((packed_axis >> 16) & 0xFF) as u8);
+        cmd.write_u8(((packed_axis >> 24) & 0xFF) as u8);
+        cmd.write_u8(((packed_axis >> 32) & 0xFF) as u8);
+        cmd.write_u8(((packed_axis >> 40) & 0xFF) as u8);
+
+        let cmd = Command::add_time(cmd);
         self.send(cmd)
     }
     // SendDateTime sends the current date/time to the drone.
     pub fn send_date_time(&self) -> Result {
-        let command = UdpCommand::new(CommandIds::TimeCmd, PackageTypes::X50Data, 11);
+        let command = UdpCommand::new(CommandIds::TimeCmd, PackageTypes::X50, 15);
         let command = Command::add_date_time(command);
         self.send(command)
     }
 
+    pub fn add_time(mut command: UdpCommand) -> UdpCommand {
+        let now = Local::now();
+        let millis = now.nanosecond() / 1_000_000; 
+        command.write_u8(now.hour() as u8);
+        command.write_u8(now.minute() as u8);
+        command.write_u8(now.second() as u8);
+        command.write_u16(millis as u16);
+        command
+    }
+
     pub fn add_date_time(mut command: UdpCommand) -> UdpCommand {
         let now = Local::now();
-        let milli = now.nanosecond() / 1_000_000; 
+        let millis = now.nanosecond() / 1_000_000; 
+        command.write_u8(0);
+        command.write_u16(now.year() as u16);
+        command.write_u16(now.month() as u16);
+        command.write_u16(now.day() as u16);
         command.write_u16(now.hour() as u16);
         command.write_u16(now.minute() as u16);
         command.write_u16(now.second() as u16);
-        command.write_u16((milli >> 8) as u16);
-        command.write_u16((milli & 0xff) as u16);
+        command.write_u16(millis as u16);
         command
     }
 }
@@ -369,10 +438,10 @@ impl Into<Vec<u8>> for UdpCommand {
 
 #[derive(Debug, Clone)]
 pub struct Package {
-    cmd: CommandIds,
-    size: u16,
-    sq_nr: u16,
-    data: PackageData,
+    pub cmd: CommandIds,
+    pub size: u16,
+    pub sq_nr: u16,
+    pub data: PackageData,
 }
 
 #[derive(Debug, Clone)]
@@ -395,11 +464,22 @@ impl TryFrom<Vec<u8>> for Message {
             let data = if size > 0 {
                 let mut data : Vec<u8>= Vec::with_capacity(size as usize);
                 cur.read_to_end(&mut data).unwrap();
+                if data.len() >= 2 {
+                    let _crc16: u16 = (data.pop().unwrap() as u16) + ((data.pop().unwrap() as u16) << 8);
+                }
                 match cmd {
                     CommandIds::FlightMsg => PackageData::FlightData(FlightData::from(data)),
                     CommandIds::WifiMsg => PackageData::WifiInfo(WifiInfo::from(data)),
                     CommandIds::LightMsg => PackageData::LightInfo(LightInfo::from(data)),
-                    //CommandIds::LogHeaderMsg => PackageData::LogMessage(LogMessage::from(data)),
+                    CommandIds::VersionMsg => PackageData::Version(String::from_utf8(data[1..].to_vec()).expect("version is not valid").trim_matches(char::from(0)).to_string()),
+                    CommandIds::AltLimitMsg => {
+                        let mut c = Cursor::new(data);
+                        let _ = c.read_u8().unwrap();
+                        let h = c.read_u16::<LittleEndian>().unwrap();
+                        PackageData::AtlInfo(h)
+                    },
+                    
+                    CommandIds::LogHeaderMsg => PackageData::LogMessage(LogMessage::from(data)),
                     _ => PackageData::Unknown(data),
                 }
             } else {
@@ -418,7 +498,6 @@ impl TryFrom<Vec<u8>> for Message {
             if data[0..9].to_vec() == b"conn_ack:" {
                 return Ok(Message::Response(ResponseMsg::Connected(String::from_utf8(data).unwrap())))
             } else if data[0..16].to_vec() == b"unknown command:" {
-                println!("data {:?}", data[17..].to_vec());
                 let mut cur = Cursor::new(data[17..].to_owned());
                 let command = CommandIds::from(cur.read_u16::<LittleEndian>().unwrap().clone());
                 return Ok(Message::Response(ResponseMsg::UnknownCommand(command)))
@@ -436,10 +515,12 @@ impl TryFrom<Vec<u8>> for Message {
 }
 
 #[derive(Debug, Clone)]
-enum PackageData {
+pub enum PackageData {
     FlightData(FlightData),
     WifiInfo(WifiInfo),
     LightInfo(LightInfo),
+    Version(String),
+    AtlInfo(u16),
     LogMessage(LogMessage),
     NoData(),
     Unknown(Vec<u8>),

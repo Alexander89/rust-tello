@@ -4,21 +4,18 @@ use sdl2::keyboard::Keycode;
 use sdl2::rect::Rect;
 use std::time::Duration;
 use std::string::String;
-use std::net::{SocketAddr, UdpSocket};
-use std::convert::TryInto;
 use std::path::Path;
-use std::ops::Deref;
-
 mod meta_data;
-use meta_data::MetaData;
 
 mod crc;
 mod command;
 mod rc_state;
 mod controller_state;
 mod drone_messages;
+mod drone_state;
 
-use command::{Command, UdpCommand, Flip};
+use drone_state::DroneState;
+use command::{Command, Flip, Message, CommandIds, PackageData, ResponseMsg};
 use rc_state::RCState;
 use controller_state::ControllerState;
 
@@ -69,13 +66,13 @@ struct MissingElement(&'static str);
 // }
 const WINDOW_WIDTH: u32 = 1280;
 const WINDOW_HEIGHT: u32 = 720;
-const VIDEO_WIDTH: u32 = 1280;
-const VIDEO_HEIGHT: u32 = 720;
+// const VIDEO_WIDTH: u32 = 1280;
+// const VIDEO_HEIGHT: u32 = 720;
 
 
 fn main() -> Result<(), String> {
     let drone = Command::new("192.168.10.1:8889");
-    
+    let mut drone_state = DroneState::new();
 
     let sdl_context = sdl2::init()?;
     let video_subsystem = sdl_context.video()?;
@@ -104,6 +101,7 @@ fn main() -> Result<(), String> {
     let mut bounce_on = false;
     let mut keyboard = ControllerState::new();
     let mut rc_state = RCState::new();
+    let mut status_counter = 0;
 
     'running: loop {
         i = (i + 1) % 255;
@@ -127,6 +125,9 @@ fn main() -> Result<(), String> {
                 Event::KeyDown { keycode: Some(Keycode::K), .. } => {
                     land = false;
                     drone.take_off().unwrap();
+                },
+                Event::KeyDown { keycode: Some(Keycode::O), .. } => {
+                    drone.start_engines(&mut rc_state);
                 },
                 Event::KeyDown { keycode: Some(Keycode::L), .. } => {
                     if land == false {
@@ -172,13 +173,45 @@ fn main() -> Result<(), String> {
             }
         }
 
-        drone.poll();
+        if let Some(msg) = drone.poll() {
+            match msg {
+                Message::Data(d) if d.cmd == CommandIds::FlightMsg => {
+                    drone_state.update(&d.data);
+
+                    if let PackageData::FlightData(d) = d.data {
+
+                        println!("battery {}", d.battery_percentage);
+                        status_counter += 1;
+                        if status_counter == 3 {
+                            drone.get_version().unwrap();
+                            drone.get_video_bitrate().unwrap();
+                            drone.get_alt_limit().unwrap();
+                            drone.get_battery_threshold().unwrap();
+                            drone.get_att_angle().unwrap();
+                            drone.get_region().unwrap();
+                            drone.set_exposure().unwrap();
+                        }
+                    }
+                }
+                Message::Data(d) if d.cmd == CommandIds::LogHeaderMsg => (),
+                Message::Data(d) => {
+                    drone_state.update(&d.data);
+                    println!("msg {:?}", d.clone());
+                }
+                Message::Response(r) => {
+                    match r {
+                        ResponseMsg::Connected(_) => println!("connected"),
+                        _ => ()
+                    }
+                }
+            }
+        }
 
         rc_state.update_rc_state(&keyboard);
         rc_state.send_command(&drone);
         
         canvas.present();
-        ::std::thread::sleep(Duration::new(0, 1_000_000_000u32 / 20));
+        ::std::thread::sleep(Duration::new(0, 1_000_000_000u32 / 10));
     }
     /*    
     let video_bind_addr = SocketAddr::from(([0, 0, 0, 0], 11112));

@@ -1,4 +1,6 @@
 
+use std::io::{Cursor, SeekFrom, Seek, BufRead};
+use byteorder::{ReadBytesExt, LittleEndian};
 
 fn int16(val0: u8, val1: u8) -> i16  {
     if (val1 & 0xff) != 0 {
@@ -9,43 +11,55 @@ fn int16(val0: u8, val1: u8) -> i16  {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct FlightData {
-    height: i16,
-    north_speed: i16,
-    east_speed: i16,
-    ground_speed: i16,
-    fly_time: i16,
-    imu_state: bool,
-    pressure_state: bool,
-    down_visual_state: bool,
-    power_state: bool,
-    battery_state: bool,
-    gravity_state: bool,
-    wind_state: bool,
-    imu_calibration_state: u8,
-    battery_percentage: u8,
-    drone_battery_left: i16,
-    drone_fly_time_left: i16,
+    pub height: i16,
+    pub north_speed: i16,
+    pub east_speed: i16,
+    pub ground_speed: i16,
+    pub fly_time: i16,
+    pub imu_state: bool,
+    pub pressure_state: bool,
+    pub down_visual_state: bool,
+    pub power_state: bool,
+    pub battery_state: bool,
+    pub gravity_state: bool,
+    pub wind_state: bool,
+    pub imu_calibration_state: u8,
+    pub battery_percentage: u8,
+    pub drone_battery_left: i16,
+    pub drone_fly_time_left: i16,
 
-    em_sky: bool,
-    em_ground: bool,
-    em_open: bool,
-    drone_hover: bool,
-    outage_recording: bool,
-    battery_low: bool,
-    battery_lower: bool,
-    factory_mode: bool,
+    pub em_sky: bool,
+    pub em_ground: bool,
+    pub em_open: bool,
+    pub drone_hover: bool,
+    pub outage_recording: bool,
+    pub battery_low: bool,
+    pub battery_lower: bool,
+    pub factory_mode: bool,
 
-    fly_mode: u8,
-    throw_fly_timer: u8,
-    camera_state: u8,
-    electrical_machinery_state: u8,
-    front_in: bool,
-    front_out: bool,
-    front_lsc: bool,
-    temperature_height: bool,
+    pub fly_mode: u8,
+    pub throw_fly_timer: u8,
+    pub camera_state: u8,
+    pub electrical_machinery_state: u8,
+    pub front_in: bool,
+    pub front_out: bool,
+    pub front_lsc: bool,
+    pub temperature_height: bool,
 }
+
+impl std::fmt::Debug for FlightData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f, 
+            "FlightData {{ alt: {}, north_sp: {}, east_sp: {}, ground_sp: {}, fly_time: {}, imu_cal: {}, battery: {}, battery_left: {}, fly_time_left: {}, fly_mode: {}, throw_fly_timer: {}, camera: {}, em: {}}}", 
+            self.height, self.north_speed, self.east_speed, self.ground_speed, self.fly_time, self.imu_calibration_state, self.battery_percentage, 
+            self.drone_battery_left, self.drone_fly_time_left, self.fly_mode, self.throw_fly_timer, self.camera_state, self.electrical_machinery_state
+        )
+    }
+}
+
 impl From<Vec<u8>> for FlightData {
     fn from(data: Vec<u8>) -> FlightData {
         FlightData {
@@ -119,12 +133,19 @@ impl From<Vec<u8>> for LightInfo {
 
 #[derive(Debug, Clone)]
 pub struct LogMessage {
-    message: String,
+    pub id: u16,
+    pub message: String,
 }
 impl From<Vec<u8>> for LogMessage {
     fn from(data: Vec<u8>) -> LogMessage {
+        let mut cur = Cursor::new(data);
+        cur.seek(SeekFrom::Start(9)).unwrap();
+        let id: u16 = cur.read_u16::<LittleEndian>().unwrap();
+        let mut msg: Vec<u8> = Vec::new();
+        cur.read_until(0, &mut msg).unwrap();
         LogMessage {
-            message: String::from_utf8(data).unwrap()
+            id,
+            message: String::from_utf8(msg).unwrap()
         }
     }
 }
