@@ -29,7 +29,7 @@ struct MissingElement(&'static str);
 
 // fn update_rc_state(rc_state: RCState, c_state: &ControllerState) -> RCState {
 //     let mut new_rc_state = rc_state.clone();
-    
+
 //     if c_state.a_down {
 //         new_rc_state = new_rc_state.go_left()
 //     } else if c_state.d_down {
@@ -71,7 +71,7 @@ const WINDOW_HEIGHT: u32 = 720;
 
 
 fn main() -> Result<(), String> {
-    let drone = Command::new("192.168.10.1:8889");
+    let mut drone = Command::new("192.168.10.1:8889");
     let mut drone_state = DroneState::new();
 
     let sdl_context = sdl2::init()?;
@@ -82,7 +82,7 @@ fn main() -> Result<(), String> {
         .opengl()
         .build()
         .expect("could not initialize video subsystem");
-    
+
     let mut canvas = window.into_canvas().build()
         .expect("could not make a canvas");
 
@@ -93,7 +93,7 @@ fn main() -> Result<(), String> {
     let font = ttf_context.load_font(font_path, 24).expect("load font");
     let keys_target = Rect::new((WINDOW_WIDTH - 250) as i32, 0, 250, 200);
     let key_text = "i: connect\nk: take_off\nl: land/cancel\nv: start/stop video";
-        
+
     let mut event_pump = sdl_context.event_pump()?;
     let mut i = 0;
     let mut land = false;
@@ -128,6 +128,9 @@ fn main() -> Result<(), String> {
                 },
                 Event::KeyDown { keycode: Some(Keycode::O), .. } => {
                     drone.start_engines(&mut rc_state);
+                },
+                Event::KeyDown { keycode: Some(Keycode::P), .. } => {
+                  drone.throw_and_go().unwrap();
                 },
                 Event::KeyDown { keycode: Some(Keycode::L), .. } => {
                     if land == false {
@@ -184,12 +187,12 @@ fn main() -> Result<(), String> {
                         status_counter += 1;
                         if status_counter == 3 {
                             drone.get_version().unwrap();
-                            drone.get_video_bitrate().unwrap();
+                            drone.get_video_bitrate(4).unwrap();
                             drone.get_alt_limit().unwrap();
                             drone.get_battery_threshold().unwrap();
                             drone.get_att_angle().unwrap();
                             drone.get_region().unwrap();
-                            drone.set_exposure().unwrap();
+                            drone.set_exposure(2).unwrap();
                         }
                     }
                 }
@@ -209,11 +212,11 @@ fn main() -> Result<(), String> {
 
         rc_state.update_rc_state(&keyboard);
         rc_state.send_command(&drone);
-        
+
         canvas.present();
         ::std::thread::sleep(Duration::new(0, 1_000_000_000u32 / 10));
     }
-    /*    
+    /*
     let video_bind_addr = SocketAddr::from(([0, 0, 0, 0], 11112));
     let video_socket = UdpSocket::bind(&video_bind_addr).expect("couldn't bind to stream address");
     video_socket.set_nonblocking(true).unwrap();
@@ -230,12 +233,12 @@ fn main() -> Result<(), String> {
         .opengl()
         .build()
         .expect("could not initialize video subsystem");
-    
+
     let mut canvas = window.into_canvas().build()
         .expect("could not make a canvas");
-        
+
     let ttf_context = sdl2::ttf::init().expect("could not initialize font subsystem");
-    
+
     let texture_creator = canvas.texture_creator();
     let font_path: &Path = Path::new("./DejaVuSans.ttf");
     let mut font = ttf_context.load_font(font_path, 128).expect("load font");
@@ -305,7 +308,7 @@ fn main() -> Result<(), String> {
         drone.publish(&command_socket);
 
         canvas.set_draw_color(Color::RGB(0, 0, 0));
-        
+
         // render a surface, and convert it to a texture bound to the canvas
         if drone_state.len() != 0 {
             let surface = font.render(drone_state.deref()).blended(Color::RGB(0, 0, 0)).unwrap();
@@ -361,7 +364,7 @@ fn main() -> Result<(), String> {
             // let surface = font.render(info_text.deref()).blended(Color::RGB(0, 0, 0)).unwrap();
             // let texture = texture_creator.create_texture_from_surface(&surface).unwrap();
             // canvas.copy(&texture, None, Some(info_target))?;
-            
+
         }
 
         if let Ok(received) = meta_socket.recv(&mut meta_buf) {

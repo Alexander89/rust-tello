@@ -6,6 +6,7 @@ use chrono::prelude::*;
 use std::convert::TryFrom;
 use std::io::{Cursor, Read, Seek, SeekFrom};
 use std::net::{SocketAddr, UdpSocket};
+use std::time::{SystemTime, Duration};
 
 static mut SEQ_NO: u16 = 1;
 
@@ -18,6 +19,7 @@ struct VideoSettings {
   pub mode: VideoMode,
   pub level: u8,
   pub encoding_rate: u8,
+  pub last_Video_poll: SystemTime,
 }
 
 #[derive(Debug)]
@@ -190,6 +192,7 @@ impl Command {
       mode: VideoMode::M960x720,
       level: 1,
       encoding_rate: 4,
+      last_Video_poll: SystemTime::now(),
     };
 
     Command { socket, video }
@@ -222,8 +225,18 @@ impl Command {
     self.send(cmd)
   }
 
-  pub fn poll(&self) -> Option<Message> {
+  pub fn poll(&mut self) -> Option<Message> {
     let mut meta_buf = [0; 1440];
+
+    // poll I-Frame  every second
+    if self.video.enabled {
+      let now = SystemTime::now();
+      let delta = now.duration_since(self.video.last_Video_poll).unwrap();
+      if delta.as_secs() > 1 {
+        self.video.last_Video_poll = now;
+        self.start_video().unwrap();
+      }
+    }
 
     if let Ok(received) = self.socket.recv(&mut meta_buf) {
       let data = meta_buf[..received].to_vec();
@@ -422,6 +435,7 @@ impl Command {
   /// ```
   pub fn start_video(&mut self) -> Result {
     self.video.enabled = true;
+    self.video.last_Video_poll = SystemTime::now();
     self.send(UdpCommand::new_with_zero_sqn(CommandIds::VideoStartCmd, PackageTypes::X60, 0))
   }
 
@@ -468,7 +482,7 @@ impl Command {
   /// // ...
   /// drone.get_video_bitrate(3).unwrap();
   /// ```
-  pub fn get_video_bitrate(&self, rate: u8) -> Result {
+  pub fn get_video_bitrate(&mut self, rate: u8) -> Result {
     self.video.encoding_rate = rate.clone();
     let mut cmd = UdpCommand::new(CommandIds::VideoEncoderRateCmd, PackageTypes::X68, 1);
     cmd.write_u8(rate);
