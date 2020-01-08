@@ -13,13 +13,14 @@ static mut SEQ_NO: u16 = 1;
 type Result = std::result::Result<(), ()>;
 
 #[derive(Debug, Clone)]
+// The video data itself is just H264 encoded YUV420p
 struct VideoSettings {
   pub port: u16,
   pub enabled: bool,
   pub mode: VideoMode,
   pub level: u8,
   pub encoding_rate: u8,
-  pub last_Video_poll: SystemTime,
+  pub last_video_poll: SystemTime,
 }
 
 #[derive(Debug)]
@@ -192,7 +193,7 @@ impl Command {
       mode: VideoMode::M960x720,
       level: 1,
       encoding_rate: 4,
-      last_Video_poll: SystemTime::now(),
+      last_video_poll: SystemTime::now(),
     };
 
     Command { socket, video }
@@ -231,9 +232,9 @@ impl Command {
     // poll I-Frame  every second
     if self.video.enabled {
       let now = SystemTime::now();
-      let delta = now.duration_since(self.video.last_Video_poll).unwrap();
+      let delta = now.duration_since(self.video.last_video_poll).unwrap();
       if delta.as_secs() > 1 {
-        self.video.last_Video_poll = now;
+        self.video.last_video_poll = now;
         self.start_video().unwrap();
       }
     }
@@ -435,7 +436,7 @@ impl Command {
   /// ```
   pub fn start_video(&mut self) -> Result {
     self.video.enabled = true;
-    self.video.last_Video_poll = SystemTime::now();
+    self.video.last_video_poll = SystemTime::now();
     self.send(UdpCommand::new_with_zero_sqn(CommandIds::VideoStartCmd, PackageTypes::X60, 0))
   }
 
