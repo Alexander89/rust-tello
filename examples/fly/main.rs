@@ -37,7 +37,7 @@ fn main() -> Result<(), String> {
     let ttf_context = sdl2::ttf::init().expect("could not initialize font subsystem");
 
     let texture_creator = canvas.texture_creator();
-    let font_path: &Path = Path::new("./DejaVuSans.ttf");
+    let font_path: &Path = Path::new("./examples/DejaVuSans.ttf");
     let font = ttf_context.load_font(font_path, 24).expect("load font");
     let keys_target = Rect::new((WINDOW_WIDTH - 250) as i32, 0, 250, 196);
     let key_texture = texture_creator.create_texture_from_surface(
@@ -197,7 +197,7 @@ fn main() -> Result<(), String> {
         if let Some(msg) = drone.poll() {
             match msg {
                 Message::Data(Package {data: PackageData::FlightData(d), ..}) => {
-                        println!("battery {}", d.battery_percentage);
+                    println!("battery {}", d.battery_percentage);
                 }
                 Message::Data(d) /*if d.cmd != CommandIds::LogHeaderMsg*/ => {
                     println!("msg {:?}", d.clone());
@@ -299,7 +299,7 @@ impl ControllerState {
         } else if self.s_down {
             rc_state.go_back()
         } else {
-            rc_state.stop_forward_backward()
+            rc_state.stop_forward_back()
         }
 
         if self.up_down {

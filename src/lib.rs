@@ -1,9 +1,128 @@
+//! Tello drone
+//!
+//! There are two interfaces for the tello drone. The text based and a
+//! non-public interface, used by the native app. The guys from the
+//! [tellopilots forum](https://tellopilots.com/) did an awesome job by
+//! reverse engineer this interface and support other public repositories
+//! for go, python...
+//!
+//! This library combines the communication protocol and a remote-control
+//!
+//! In the sources you will find an example, how to create a SDL-UI and use
+//! the keyboard to control the drone. You can run it with `cargo run --example fly`
+//!
+//! # Communication
+//!
+//! The Tello drone send data on two UDP channels. First the command channel (8889)
+//! and second (WIP) the video channel (default: 11111). In the AP mode, the drone
+//! will appear with the default ip 192.168.10.1. All send calls are done sync.
+//! To receive the data, you have to poll the drone. Here is an example:
+//!
+//!
+//! ## Examples
+//! ```
+//! use tello::{Drone, Message, Package, PackageData, ResponseMsg};
+//! use std::time::Duration;
+//!
+//! fn main() -> Result<(), String> {
+//!     let mut drone = Drone::new("192.168.10.1:8889");
+//!     drone.connect(11111);
+//!     loop {
+//!         if let Some(msg) = drone.poll() {
+//!             match msg {
+//!                 Message::Data(Package {data: PackageData::FlightData(d), ..}) => {
+//!                     println!("battery {}", d.battery_percentage);
+//!                 }
+//!                 Message::Response(ResponseMsg::Connected(_)) => {
+//!                     println!("connected");
+//!                     drone.throw_and_go().unwrap();
+//!                 }
+//!                 _ => ()
+//!             }
+//!         }
+//!         ::std::thread::sleep(Duration::new(0, 1_000_000_000u32 / 20));
+//!     }
+//! }
+//! ```
+//!
+//! # Remote control
+//!
+//! the poll is not only receiving messages from the drone, it will also send some default-settings,
+//! replies with acknowledgements, triggers the key frames or send the remote-control state for the
+//! live move commands.
+//!
+//! The Drone contains a rc_state to manipulate the movement. e.g.: `drone.rc_state.go_down()`,
+//! `drone.rc_state.go_forward_back(-0.7)`
+//!
+//! The following example is opening a window with SDL, handles the keyboard inputs and shows how to connect a
+//! game pad or joystick.
+//!
+//!
+//! ## Examples
+//! ```
+//! use sdl2::event::Event;
+//! use sdl2::keyboard::Keycode;
+//! use tello::{Drone, Message, Package, PackageData, ResponseMsg};
+//! use std::time::Duration;
+//!
+//! fn main() -> Result<(), String> {
+//!     let mut drone = Drone::new("192.168.10.1:8889");
+//!     drone.connect(11111);
+//!
+//!     let sdl_context = sdl2::init()?;
+//!     let video_subsystem = sdl_context.video()?;
+//!     let window = video_subsystem.window("TELLO drone", 1280, 720).build().unwrap();
+//!     let mut canvas = window.into_canvas().build().unwrap();
+//!
+//!     let mut event_pump = sdl_context.event_pump()?;
+//!     'running: loop {
+//!         // draw some stuff
+//!         canvas.clear();
+//!         // [...]
+//!
+//!         // handle input from a keyboard or something like a game-pad
+//!         // ue the keyboard events
+//!         for event in event_pump.poll_iter() {
+//!             match event {
+//!                 Event::Quit { .. }
+//!                 | Event::KeyDown { keycode: Some(Keycode::Escape), .. } =>
+//!                     break 'running,
+//!                 Event::KeyDown { keycode: Some(Keycode::K), .. } =>
+//!                     drone.take_off().unwrap(),
+//!                 Event::KeyDown { keycode: Some(Keycode::L), .. } =>
+//!                     drone.land().unwrap(),
+//!                 Event::KeyDown { keycode: Some(Keycode::A), .. } =>
+//!                     drone.rc_state.go_left(),
+//!                 Event::KeyDown { keycode: Some(Keycode::D), .. } =>
+//!                     drone.rc_state.go_right(),
+//!                 Event::KeyUp { keycode: Some(Keycode::A), .. }
+//!                 | Event::KeyUp { keycode: Some(Keycode::D), .. } =>
+//!                     drone.rc_state.stop_left_right(),
+//!                 //...
+//!             }
+//!         }
+//!
+//!         // or use a game pad (range from -1 to 1)
+//!         // drone.rc_state.go_left_right(dummy_joystick.axis.1);
+//!         // drone.rc_state.go_forward_back(dummy_joystick.axis.2);
+//!         // drone.rc_state.go_up_down(dummy_joystick.axis.3);
+//!         // drone.rc_state.turn(dummy_joystick.axis.4);
+//!
+//!         // the poll will send the move command to the drone
+//!         drone.poll();
+//!
+//!         canvas.present();
+//!         ::std::thread::sleep(Duration::new(0, 1_000_000_000u32 / 20));
+//!     }
+//! }
+//! ```
+
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use chrono::prelude::*;
 use crc::{crc16, crc8};
 use drone_state::{FlightData, LightInfo, LogMessage, WifiInfo};
-use std::convert::TryFrom;
-use std::io::{Cursor, Read, Seek, SeekFrom};
+use std::convert::{TryFrom};
+use std::io::{Cursor, Read, Write, Seek, SeekFrom};
 use std::net::{SocketAddr, UdpSocket};
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::time::SystemTime;
@@ -162,6 +281,7 @@ pub enum ResponseMsg {
     UnknownCommand(CommandIds),
 }
 
+#[derive(Debug, Clone, Copy)]
 #[repr(u8)]
 pub enum PackageTypes {
     X48 = 0x48,
@@ -268,7 +388,7 @@ impl Drone {
     // when the drone send the current log stats, it is required to ack this.
     // The logic is implemented in the poll function.
     fn send_ack_log(&self, id: u16) -> Result {
-        let mut cmd = UdpCommand::new_with_zero_sqn(CommandIds::LogHeaderMsg, PackageTypes::X50, 2);
+        let mut cmd = UdpCommand::new_with_zero_sqn(CommandIds::LogHeaderMsg, PackageTypes::X50);
         cmd.write_u16(id);
         self.send(cmd)
     }
@@ -337,42 +457,41 @@ impl Drone {
         self.send(UdpCommand::new(
             CommandIds::TakeoffCmd,
             PackageTypes::X68,
-            0,
         ))
     }
     pub fn throw_and_go(&self) -> Result {
-        let mut cmd = UdpCommand::new(CommandIds::ThrowAndGoCmd, PackageTypes::X48, 1);
+        let mut cmd = UdpCommand::new(CommandIds::ThrowAndGoCmd, PackageTypes::X48);
         cmd.write_u8(0);
         self.send(cmd)
     }
     pub fn land(&self) -> Result {
-        let mut command = UdpCommand::new(CommandIds::LandCmd, PackageTypes::X68, 1);
+        let mut command = UdpCommand::new(CommandIds::LandCmd, PackageTypes::X68);
         command.write_u8(0x00);
         self.send(command)
     }
     pub fn stop_land(&self) -> Result {
-        let mut command = UdpCommand::new(CommandIds::LandCmd, PackageTypes::X68, 1);
+        let mut command = UdpCommand::new(CommandIds::LandCmd, PackageTypes::X68);
         command.write_u8(0x00);
         self.send(command)
     }
     pub fn palm_land(&self) -> Result {
-        let mut cmd = UdpCommand::new(CommandIds::PalmLandCmd, PackageTypes::X68, 1);
+        let mut cmd = UdpCommand::new(CommandIds::PalmLandCmd, PackageTypes::X68);
         cmd.write_u8(0);
         self.send(cmd)
     }
 
     pub fn flip(&self, direction: Flip) -> Result {
-        let mut cmd = UdpCommand::new_with_zero_sqn(CommandIds::FlipCmd, PackageTypes::X70, 1);
+        let mut cmd = UdpCommand::new_with_zero_sqn(CommandIds::FlipCmd, PackageTypes::X70);
         cmd.write_u8(direction as u8);
         self.send(cmd)
     }
     pub fn bounce(&self) -> Result {
-        let mut cmd = UdpCommand::new(CommandIds::BounceCmd, PackageTypes::X68, 1);
+        let mut cmd = UdpCommand::new(CommandIds::BounceCmd, PackageTypes::X68);
         cmd.write_u8(0x30);
         self.send(cmd)
     }
     pub fn bounce_stop(&self) -> Result {
-        let mut cmd = UdpCommand::new(CommandIds::BounceCmd, PackageTypes::X68, 1);
+        let mut cmd = UdpCommand::new(CommandIds::BounceCmd, PackageTypes::X68);
         cmd.write_u8(0x31);
         self.send(cmd)
     }
@@ -381,18 +500,16 @@ impl Drone {
         self.send(UdpCommand::new(
             CommandIds::VersionMsg,
             PackageTypes::X48,
-            0,
         ))
     }
     pub fn get_alt_limit(&self) -> Result {
         self.send(UdpCommand::new(
             CommandIds::AltLimitMsg,
             PackageTypes::X68,
-            0,
         ))
     }
     pub fn set_alt_limit(&self, limit: u8) -> Result {
-        let mut cmd = UdpCommand::new(CommandIds::AltLimitCmd, PackageTypes::X68, 2);
+        let mut cmd = UdpCommand::new(CommandIds::AltLimitCmd, PackageTypes::X68);
         cmd.write_u8(limit);
         cmd.write_u8(0);
         self.send(cmd)
@@ -401,11 +518,10 @@ impl Drone {
         self.send(UdpCommand::new(
             CommandIds::AttLimitMsg,
             PackageTypes::X68,
-            0,
         ))
     }
     pub fn set_att_angle(&self) -> Result {
-        let mut cmd = UdpCommand::new(CommandIds::AttLimitCmd, PackageTypes::X68, 4);
+        let mut cmd = UdpCommand::new(CommandIds::AttLimitCmd, PackageTypes::X68);
         cmd.write_u8(0);
         cmd.write_u8(0);
         // TODO set angle correct
@@ -419,11 +535,10 @@ impl Drone {
         self.send(UdpCommand::new(
             CommandIds::LowBatThresholdMsg,
             PackageTypes::X68,
-            0,
         ))
     }
     pub fn set_battery_threshold(&self, threshold: u8) -> Result {
-        let mut cmd = UdpCommand::new(CommandIds::LowBatThresholdCmd, PackageTypes::X68, 1);
+        let mut cmd = UdpCommand::new(CommandIds::LowBatThresholdCmd, PackageTypes::X68);
         cmd.write_u8(threshold);
         self.send(cmd)
     }
@@ -432,7 +547,6 @@ impl Drone {
         self.send(UdpCommand::new(
             CommandIds::WifiRegionCmd,
             PackageTypes::X48,
-            0,
         ))
     }
 
@@ -441,7 +555,7 @@ impl Drone {
     // roll right/left -1 -> 1
     // yaw cw/ccw -1 -> 1
     pub fn send_stick(&self, pitch: f32, nick: f32, roll: f32, yaw: f32, fast: bool) -> Result {
-        let mut cmd = UdpCommand::new_with_zero_sqn(CommandIds::StickCmd, PackageTypes::X60, 11);
+        let mut cmd = UdpCommand::new_with_zero_sqn(CommandIds::StickCmd, PackageTypes::X60);
 
         // RightX center=1024 left =364 right =-364
         let pitch_u = (1024.0 + 660.0 * pitch) as i64;
@@ -479,7 +593,7 @@ impl Drone {
     }
     // SendDateTime sends the current date/time to the drone.
     pub fn send_date_time(&self) -> Result {
-        let command = UdpCommand::new(CommandIds::TimeCmd, PackageTypes::X50, 15);
+        let command = UdpCommand::new(CommandIds::TimeCmd, PackageTypes::X50);
         let command = Drone::add_date_time(command);
         self.send(command)
     }
@@ -525,11 +639,7 @@ impl Drone {
     pub fn start_video(&mut self) -> Result {
         self.video.enabled = true;
         self.video.last_video_poll = SystemTime::now();
-        self.send(UdpCommand::new_with_zero_sqn(
-            CommandIds::VideoStartCmd,
-            PackageTypes::X60,
-            0,
-        ))
+        self.send(UdpCommand::new_with_zero_sqn(CommandIds::VideoStartCmd, PackageTypes::X60))
     }
 
     /// Same as start_video(), but a better name to poll the (SPS/PPS) for the video stream.
@@ -550,7 +660,7 @@ impl Drone {
     pub fn set_video_mode(&mut self, mode: VideoMode) -> Result {
         self.video.mode = mode.clone();
         let mut cmd =
-            UdpCommand::new_with_zero_sqn(CommandIds::VideoStartCmd, PackageTypes::X68, 1);
+            UdpCommand::new_with_zero_sqn(CommandIds::VideoStartCmd, PackageTypes::X68);
         cmd.write_u8(mode as u8);
         self.send(cmd)
     }
@@ -566,7 +676,7 @@ impl Drone {
     /// drone.set_exposure(2).unwrap();
     /// ```
     pub fn set_exposure(&mut self, level: u8) -> Result {
-        let mut cmd = UdpCommand::new(CommandIds::ExposureCmd, PackageTypes::X48, 1);
+        let mut cmd = UdpCommand::new(CommandIds::ExposureCmd, PackageTypes::X48);
         cmd.write_u8(level);
         self.send(cmd)
     }
@@ -583,7 +693,7 @@ impl Drone {
     /// ```
     pub fn set_video_bitrate(&mut self, rate: u8) -> Result {
         self.video.encoding_rate = rate;
-        let mut cmd = UdpCommand::new(CommandIds::VideoEncoderRateCmd, PackageTypes::X68, 1);
+        let mut cmd = UdpCommand::new(CommandIds::VideoEncoderRateCmd, PackageTypes::X68);
         cmd.write_u8(rate);
         self.send(cmd)
     }
@@ -603,43 +713,37 @@ impl Drone {
         self.send(UdpCommand::new(
             CommandIds::TakePictureCommand,
             PackageTypes::X68,
-            0,
         ))
     }
 }
 
+/// wrapper to generate Udp Commands to send them to the drone.
+///
+/// It is public, to enable users to implement missing commands
 #[derive(Debug, Clone)]
 pub struct UdpCommand {
+    cmd: CommandIds,
+    pkt_type: PackageTypes,
+    zero_sqn: bool,
     inner: Vec<u8>,
 }
 
 impl UdpCommand {
-    pub fn new(cmd: CommandIds, pkt_type: PackageTypes, length: u16) -> UdpCommand {
-        let mut cur = Cursor::new(Vec::new());
-        cur.write_u8(START_OF_PACKET).expect("");
-        cur.write_u16::<LittleEndian>((length + 11) << 3).expect("");
-        cur.write_u8(crc8(cur.clone().into_inner())).expect("");
-        cur.write_u8(pkt_type as u8).expect("");
-        cur.write_u16::<LittleEndian>(cmd as u16).expect("");
-
-        let nr = SEQ_NO.fetch_add(1, Ordering::SeqCst);
-        cur.write_u16::<LittleEndian>(nr).expect("");
-
+    /// create a new command, prepare the header to send out the command
+    pub fn new(cmd: CommandIds, pkt_type: PackageTypes) -> UdpCommand {
         UdpCommand {
-            inner: cur.into_inner(),
+            cmd,
+            pkt_type,
+            zero_sqn: false,
+            inner: Vec::new(),
         }
     }
-    pub fn new_with_zero_sqn(cmd: CommandIds, pkt_type: PackageTypes, length: u16) -> UdpCommand {
-        let mut cur = Cursor::new(Vec::new());
-        cur.write_u8(START_OF_PACKET).expect("");
-        cur.write_u16::<LittleEndian>((length + 11) << 3).expect("");
-        cur.write_u8(crc8(cur.clone().into_inner())).expect("");
-        cur.write_u8(pkt_type as u8).expect("");
-        cur.write_u16::<LittleEndian>(cmd as u16).expect("");
-        cur.write_u16::<LittleEndian>(0).expect("");
-
+    pub fn new_with_zero_sqn(cmd: CommandIds, pkt_type: PackageTypes) -> UdpCommand {
         UdpCommand {
-            inner: cur.into_inner(),
+            cmd,
+            pkt_type,
+            zero_sqn: true,
+            inner: Vec::new(),
         }
     }
 }
@@ -664,11 +768,37 @@ impl UdpCommand {
 }
 
 impl Into<Vec<u8>> for UdpCommand {
-    fn into(mut self) -> Vec<u8> {
-        self.inner
-            .write_u16::<LittleEndian>(crc16(self.inner.clone()))
+    fn into(self) -> Vec<u8> {
+        let mut data = {
+            let lng = self.inner.len();
+            let data: &[u8]= &self.inner;
+
+            let mut cur = Cursor::new(Vec::new());
+            cur.write_u8(START_OF_PACKET).expect("");
+            cur.write_u16::<LittleEndian>((lng as u16 + 11) << 3).expect("");
+            cur.write_u8(crc8(cur.clone().into_inner())).expect("");
+            cur.write_u8(self.pkt_type as u8).expect("");
+            cur.write_u16::<LittleEndian>(self.cmd as u16).expect("");
+
+            if self.zero_sqn {
+                cur.write_u16::<LittleEndian>(0).expect("");
+            } else {
+                let nr = SEQ_NO.fetch_add(1, Ordering::SeqCst);
+                cur.write_u16::<LittleEndian>(nr).expect("");
+            }
+
+            if lng > 0 {
+                cur.write_all(&data).unwrap();
+            }
+
+            cur.into_inner()
+        };
+
+        data
+            .write_u16::<LittleEndian>(crc16(data.clone()))
             .expect("");
-        self.inner
+
+        data
     }
 }
 
@@ -758,12 +888,12 @@ impl TryFrom<Vec<u8>> for Message {
 
 #[derive(Debug, Clone)]
 pub enum PackageData {
-    FlightData(FlightData),
-    WifiInfo(WifiInfo),
-    LightInfo(LightInfo),
-    Version(String),
-    AtlInfo(u16),
-    LogMessage(LogMessage),
     NoData(),
+    AtlInfo(u16),
+    FlightData(FlightData),
+    LightInfo(LightInfo),
+    LogMessage(LogMessage),
+    Version(String),
+    WifiInfo(WifiInfo),
     Unknown(Vec<u8>),
 }

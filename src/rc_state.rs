@@ -2,7 +2,7 @@ use std::time::SystemTime;
 
 /// represent the current input to remote control the drone.
 ///
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct RCState {
     left_right: f32,
     forward_back: f32,
@@ -11,20 +11,6 @@ pub struct RCState {
 
     start_engines: bool,
     start_engines_set_time: Option<SystemTime>,
-}
-
-
-impl Default for RCState {
-    fn default() -> Self {
-        RCState {
-            left_right: 0.0,
-            forward_back: 0.0,
-            turn: 0.0,
-            up_down: 0.0,
-            start_engines: false,
-            start_engines_set_time: None,
-        }
-    }
 }
 
 impl RCState {
@@ -64,9 +50,7 @@ impl RCState {
             )
         }
     }
-}
 
-impl RCState {
     /// stop moving left or right by setting the axis to 0.0
     pub fn stop_left_right(&mut self) {
         self.left_right = 0.0;
@@ -98,24 +82,25 @@ impl RCState {
 
         self.left_right = value;
     }
-}
 
-impl RCState {
-    pub fn stop_forward_backward(&mut self) {
+    /// stop moving forward or back by setting the axis to 0.0
+    pub fn stop_forward_back(&mut self) {
         self.forward_back = 0.0;
     }
 
+    /// set a fixed value of -1.0 to the forward and back axis to fly back
     pub fn go_back(&mut self) {
         if self.forward_back > 0.0 {
-            self.stop_forward_backward()
+            self.stop_forward_back()
         } else {
             self.forward_back = -1.0;
         }
     }
 
+    /// set a fixed value of 1.0 to the forward and back axis to fly forward
     pub fn go_forward(&mut self) {
         if self.forward_back < 0.0 {
-            self.stop_forward_backward()
+            self.stop_forward_back()
         } else {
             self.forward_back = 1.0;
         }
@@ -129,13 +114,13 @@ impl RCState {
 
         self.forward_back = value;
     }
-}
 
-impl RCState {
+    /// stop moving up or down by setting the axis to 0.0
     pub fn stop_up_down(&mut self) {
         self.up_down = 0.0;
     }
 
+    /// set a fixed value of -1.0 to the up and down axis to raise up
     pub fn go_down(&mut self) {
         if self.up_down > 0.0 {
             self.stop_up_down()
@@ -144,6 +129,7 @@ impl RCState {
         }
     }
 
+    /// set a fixed value of 1.0 to the up and down axis to go down
     pub fn go_up(&mut self) {
         if self.up_down < 0.0 {
             self.stop_up_down()
@@ -160,13 +146,13 @@ impl RCState {
 
         self.up_down = value;
     }
-}
 
-impl RCState {
+    /// stop turning by setting it to 0.0
     pub fn stop_turn(&mut self) {
         self.turn = 0.0;
     }
 
+    /// set a fixed value of -1.0 to the turn axis to turn counter clock wise
     pub fn go_ccw(&mut self) {
         if self.turn > 0.0 {
             self.stop_turn()
@@ -175,6 +161,7 @@ impl RCState {
         }
     }
 
+    /// set a fixed value of 1.0 to the forward and back axis to turn clock wise
     pub fn go_cw(&mut self) {
         if self.turn < 0.0 {
             self.stop_turn()

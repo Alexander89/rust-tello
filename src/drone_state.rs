@@ -1,4 +1,6 @@
 use super::PackageData;
+use byteorder::{LittleEndian, ReadBytesExt};
+use std::io::{BufRead, Cursor, Seek, SeekFrom};
 
 ///
 /// Represents the last received meta data from the drone
@@ -11,12 +13,22 @@ pub struct DroneMeta {
 }
 
 impl DroneMeta {
+    /// returns an option of the FlightData.
+    ///
+    /// this will always represent the last state event if the network connection is dropped
     pub fn get_flight_data(&self) -> Option<FlightData> {
         self.flight.clone()
     }
+    /// returns an option of the WifiInfo.
+    /// stang 90% is max in the AP mode
+    ///
+    /// this will always represent the last state event if the network connection is dropped
     pub fn get_wifi_info(&self) -> Option<WifiInfo> {
         self.wifi.clone()
     }
+    /// returns an option of the LightInfo.
+    ///
+    /// this will always represent the last state event if the network connection is dropped
     pub fn get_light_info(&self) -> Option<LightInfo> {
         self.light.clone()
     }
@@ -32,8 +44,6 @@ impl DroneMeta {
     }
 }
 
-use byteorder::{LittleEndian, ReadBytesExt};
-use std::io::{BufRead, Cursor, Seek, SeekFrom};
 
 fn int16(val0: u8, val1: u8) -> i16 {
     if val1 != 0 {
@@ -153,11 +163,11 @@ impl From<Vec<u8>> for WifiInfo {
 
 #[derive(Debug, Clone)]
 pub struct LightInfo {
-    good: u8,
+    good: bool,
 }
 impl From<Vec<u8>> for LightInfo {
     fn from(data: Vec<u8>) -> LightInfo {
-        LightInfo { good: data[0] }
+        LightInfo { good: data[0] == 0 }
     }
 }
 
@@ -169,13 +179,13 @@ pub struct LogMessage {
 impl From<Vec<u8>> for LogMessage {
     fn from(data: Vec<u8>) -> LogMessage {
         let mut cur = Cursor::new(data);
-        cur.seek(SeekFrom::Start(9)).unwrap();
         let id: u16 = cur.read_u16::<LittleEndian>().unwrap();
+        cur.seek(SeekFrom::Start(19)).unwrap();
         let mut msg: Vec<u8> = Vec::new();
         cur.read_until(0, &mut msg).unwrap();
         LogMessage {
             id,
-            message: String::from_utf8(msg).unwrap(),
+            message: String::from_utf8(msg).unwrap().trim_matches('\u{0}').to_string(),
         }
     }
 }
