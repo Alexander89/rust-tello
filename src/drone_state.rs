@@ -11,6 +11,15 @@ pub struct DroneMeta {
 }
 
 impl DroneMeta {
+    pub fn get_flight_data(&self) -> Option<FlightData> {
+        self.flight.clone()
+    }
+    pub fn get_wifi_info(&self) -> Option<WifiInfo> {
+        self.wifi.clone()
+    }
+    pub fn get_light_info(&self) -> Option<LightInfo> {
+        self.light.clone()
+    }
     /// applies the package to the current data.
     /// It ignore non Meta package data and just overwrite the current metadata
     pub fn update(&mut self, package: &PackageData) {

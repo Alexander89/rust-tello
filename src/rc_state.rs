@@ -1,4 +1,3 @@
-use super::Drone;
 use std::time::SystemTime;
 
 /// represent the current input to remote control the drone.
@@ -10,10 +9,10 @@ pub struct RCState {
     turn: f32,
     up_down: f32,
 
-    max_speed: f32,
     start_engines: bool,
     start_engines_set_time: Option<SystemTime>,
 }
+
 
 impl Default for RCState {
     fn default() -> Self {
@@ -22,7 +21,6 @@ impl Default for RCState {
             forward_back: 0.0,
             turn: 0.0,
             up_down: 0.0,
-            max_speed: 1.0,
             start_engines: false,
             start_engines_set_time: None,
         }
@@ -37,10 +35,12 @@ impl RCState {
         self.start_engines_set_time = Some(SystemTime::now());
     }
 
-    pub fn send_command(&mut self, cmd: &Drone) {
+    /// returns the current stick parameter to send them to the drone
+    ///
+    /// Actually, this is an workaround to keep the start_engines in this struct and
+    /// don't move them to the Drone it self
+    pub fn get_stick_parameter(&mut self) -> (f32, f32, f32, f32, bool) {
         if self.start_engines {
-            cmd.send_stick(-1.0, -1.0, -1.0, 1.0, true).unwrap();
-
             if let Some(start) = self.start_engines_set_time {
                 let elapsed = SystemTime::now().duration_since(start);
                 if let Ok(time) = elapsed {
@@ -53,42 +53,45 @@ impl RCState {
             } else {
                 self.start_engines = false;
             }
+            (-1.0, -1.0, -1.0, 1.0, true)
         } else {
-            cmd.send_stick(
+            (
                 self.up_down,
                 self.forward_back,
                 self.left_right,
                 self.turn,
                 true,
             )
-            .unwrap();
         }
     }
 }
 
 impl RCState {
+    /// stop moving left or right by setting the axis to 0.0
     pub fn stop_left_right(&mut self) {
         self.left_right = 0.0;
     }
 
+    /// set a fixed value of -1.0 to the left right axis to fly to the left
     pub fn go_left(&mut self) {
         if self.left_right > 0.0 {
             self.stop_left_right()
         } else {
-            self.left_right = -1.0; // -= (self.max_speed + self.left_right) / 5.0;
+            self.left_right = -1.0;
         }
     }
 
+    /// set a fixed value of 1.0 to the left right axis to fly to the right
     pub fn go_right(&mut self) {
         if self.left_right < 0.0 {
             self.stop_left_right()
         } else {
-            // += to go left
-            self.left_right = 1.0; //+= (self.max_speed - self.left_right) / 5.0;
+            self.left_right = 1.0;
         }
     }
 
-    ///
+    /// set a analog value to the left right axis
+    /// this value has to be between -1 and 1 (including), where -1 is left and 1 is right
     pub fn go_left_right(&mut self, value: f32) {
         assert!(value <= 1.0);
         assert!(value >= -1.0);
@@ -106,8 +109,7 @@ impl RCState {
         if self.forward_back > 0.0 {
             self.stop_forward_backward()
         } else {
-            // -= to go back
-            self.forward_back = -1.0; //-= (self.max_speed + self.forward_back) / 5.0;
+            self.forward_back = -1.0;
         }
     }
 
@@ -115,9 +117,17 @@ impl RCState {
         if self.forward_back < 0.0 {
             self.stop_forward_backward()
         } else {
-            // += to go left
-            self.forward_back = 1.0; //+= (self.max_speed - self.forward_back) / 5.0;
+            self.forward_back = 1.0;
         }
+    }
+
+    /// set a analog value to the forward or back axis
+    /// this value has to be between -1 and 1 (including), where -1 is back and 1 is forward
+    pub fn go_forward_back(&mut self, value: f32) {
+        assert!(value <= 1.0);
+        assert!(value >= -1.0);
+
+        self.forward_back = value;
     }
 }
 
@@ -130,8 +140,7 @@ impl RCState {
         if self.up_down > 0.0 {
             self.stop_up_down()
         } else {
-            // -= to go down
-            self.up_down = -1.0; //-= (self.max_speed + self.up_down) / 5.0;
+            self.up_down = -1.0;
         }
     }
 
@@ -139,9 +148,17 @@ impl RCState {
         if self.up_down < 0.0 {
             self.stop_up_down()
         } else {
-            // += to go left
-            self.up_down = 1.0; //+= (self.max_speed - self.up_down) / 5.0;
+            self.up_down = 1.0;
         }
+    }
+
+    /// set a analog value to the up or down axis
+    /// this value has to be between -1 and 1 (including), where -1 is going down and 1 is flying up
+    pub fn go_up_down(&mut self, value: f32) {
+        assert!(value <= 1.0);
+        assert!(value >= -1.0);
+
+        self.up_down = value;
     }
 }
 
@@ -154,8 +171,7 @@ impl RCState {
         if self.turn > 0.0 {
             self.stop_turn()
         } else {
-            // -= to go ccw
-            self.turn = -1.0; //-= (self.max_speed + self.turn) / 5.0;
+            self.turn = -1.0;
         }
     }
 
@@ -163,8 +179,16 @@ impl RCState {
         if self.turn < 0.0 {
             self.stop_turn()
         } else {
-            // += to go left
-            self.turn = 1.0; //+= (self.max_speed - self.turn) / 5.0;
+            self.turn = 1.0;
         }
+    }
+
+    /// Set a analog value to turn the drone
+    /// This value has to be between -1 and 1 (including), where -1 is turning ccw and 1 is turning cw
+    pub fn turn(&mut self, value: f32) {
+        assert!(value <= 1.0);
+        assert!(value >= -1.0);
+
+        self.turn = value;
     }
 }

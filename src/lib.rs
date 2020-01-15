@@ -274,8 +274,8 @@ impl Drone {
     }
 
     pub fn poll(&mut self) -> Option<Message> {
-        self.rc_state.clone().send_command(&self);
-
+        let (pitch, nick, roll, yaw, fast) = self.rc_state.get_stick_parameter();
+        self.send_stick(pitch, nick, roll, yaw, fast).unwrap();
         // poll I-Frame  every second
         if self.video.enabled {
             let now = SystemTime::now();

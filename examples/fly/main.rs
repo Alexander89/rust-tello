@@ -6,7 +6,8 @@ use std::path::Path;
 use std::string::String;
 use std::time::Duration;
 
-use tello::{CommandIds, Drone, Flip, Message, PackageData, RCState, ResponseMsg};
+use std::ops::Deref;
+use tello::{Drone, Flip, Message, Package, PackageData, RCState, ResponseMsg};
 
 // extern crate glib;
 #[derive(Debug)]
@@ -14,8 +15,6 @@ struct MissingElement(&'static str);
 
 const WINDOW_WIDTH: u32 = 1280;
 const WINDOW_HEIGHT: u32 = 720;
-// const VIDEO_WIDTH: u32 = 1280;
-// const VIDEO_HEIGHT: u32 = 720;
 
 fn main() -> Result<(), String> {
     let mut drone = Drone::new("192.168.10.1:8889");
@@ -40,30 +39,41 @@ fn main() -> Result<(), String> {
     let texture_creator = canvas.texture_creator();
     let font_path: &Path = Path::new("./DejaVuSans.ttf");
     let font = ttf_context.load_font(font_path, 24).expect("load font");
-    let keys_target = Rect::new((WINDOW_WIDTH - 250) as i32, 0, 250, 200);
-    let key_text = "i: connect\nk: take_off\nl: land/cancel\nv: start/stop video";
+    let keys_target = Rect::new((WINDOW_WIDTH - 250) as i32, 0, 250, 196);
+    let key_texture = texture_creator.create_texture_from_surface(
+        &font
+            .render("i: connect\nk: take off\no: manual take off\np: throw 'n go\nl: land/cancel\nv: start video\nESC: Exit")
+            .blended_wrapped(Color::RGB(0, 0, 0), 250)
+            .unwrap()
+    ).unwrap();
+    let control_target = Rect::new(10, 0, 240, 112);
+    let control_texture = texture_creator.create_texture_from_surface(
+        &font
+            .render("w/s: forward/back\na/d: left/right\nup/down: up/down\nleft/right: turn")
+            .blended_wrapped(Color::RGB(0, 0, 0), 240)
+            .unwrap()
+    ).unwrap();
+    let stats_target = Rect::new(50, WINDOW_HEIGHT as i32 - 40, WINDOW_WIDTH - 100, 40);
 
     let mut event_pump = sdl_context.event_pump()?;
 
-    let mut i = 0;
     let mut land = false;
     let mut video_on = false;
     let mut bounce_on = false;
     let mut keyboard = ControllerState::default();
 
     'running: loop {
-        i = (i + 1) % 255;
-        canvas.set_draw_color(Color::RGB(i, 64, 255 - i));
+        canvas.set_draw_color(Color::RGB(80, 64, 255 - 80));
         canvas.clear();
+        canvas.copy(&key_texture, None, Some(keys_target))?;
+        canvas.copy(&control_texture, None, Some(control_target))?;
 
-        let surface = font
-            .render(key_text)
-            .blended_wrapped(Color::RGB(0, 0, 0), 250)
-            .unwrap();
-        let texture = texture_creator
-            .create_texture_from_surface(&surface)
-            .unwrap();
-        canvas.copy(&texture, None, Some(keys_target))?;
+        if let Some(data) = drone.drone_meta.get_flight_data() {
+            let d = format!("{:?}", data);
+            let surface_stats = font.render(d.deref()).blended(Color::RGB(0, 0, 0)).unwrap();
+            let texture_stats = texture_creator.create_texture_from_surface(&surface_stats).unwrap();
+            canvas.copy(&texture_stats, None, Some(stats_target))?;
+        }
 
         for event in event_pump.poll_iter() {
             match event {
@@ -173,11 +183,11 @@ fn main() -> Result<(), String> {
                 Event::KeyDown {
                     keycode: Some(keycode),
                     ..
-                } => keyboard.key_down(keycode),
+                } => keyboard.handle_key_down(keycode),
                 Event::KeyUp {
                     keycode: Some(keycode),
                     ..
-                } => keyboard.key_up(keycode),
+                } => keyboard.handle_key_up(keycode),
                 _ => {}
             }
         }
@@ -186,16 +196,14 @@ fn main() -> Result<(), String> {
 
         if let Some(msg) = drone.poll() {
             match msg {
-                Message::Data(d) if d.cmd == CommandIds::FlightMsg => {
-                if let PackageData::FlightData(d) = d.data {
-                    println!("battery {}", d.battery_percentage);
-                }
+                Message::Data(Package {data: PackageData::FlightData(d), ..}) => {
+                        println!("battery {}", d.battery_percentage);
                 }
                 Message::Data(d) /*if d.cmd != CommandIds::LogHeaderMsg*/ => {
-                println!("msg {:?}", d.clone());
+                    println!("msg {:?}", d.clone());
                 }
                 Message::Response(ResponseMsg::Connected(_)) => {
-                println!("connected");
+                    println!("connected");
                 }
                 _ => ()
             }
@@ -224,7 +232,8 @@ pub struct ControllerState {
 
 impl ControllerState {
 
-    pub fn key_down(&mut self, keycode: Keycode) {
+    /// handle the SDL key down event
+    pub fn handle_key_down(&mut self, keycode: Keycode) {
         match keycode {
             Keycode::A => {
                 self.d_down = false;
@@ -261,7 +270,8 @@ impl ControllerState {
             _ => (),
         }
     }
-    pub fn key_up(&mut self, keycode: Keycode) {
+    /// handle the SDL key up event
+    pub fn handle_key_up(&mut self, keycode: Keycode) {
         match keycode {
             Keycode::A => self.a_down = false,
             Keycode::D => self.d_down = false,
