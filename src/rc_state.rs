@@ -1,7 +1,8 @@
-use std::net::UdpSocket;
-use crate::{ControllerState, Command};
-use std::time::{SystemTime, Duration};
+use super::Drone;
+use std::time::SystemTime;
 
+/// represent the current input to remote control the drone.
+///
 #[derive(Clone, Debug)]
 pub struct RCState {
     left_right: f32,
@@ -14,8 +15,8 @@ pub struct RCState {
     start_engines_set_time: Option<SystemTime>,
 }
 
-impl RCState {
-    pub fn new() -> RCState {
+impl Default for RCState {
+    fn default() -> Self {
         RCState {
             left_right: 0.0,
             forward_back: 0.0,
@@ -26,47 +27,17 @@ impl RCState {
             start_engines_set_time: None,
         }
     }
+}
 
+impl RCState {
+    /// set the rc-controller to the mode to hold down the key-combination to do an manual take_off.
+    ///
     pub fn start_engines(&mut self) {
         self.start_engines = true;
         self.start_engines_set_time = Some(SystemTime::now());
     }
 
-    pub fn update_rc_state(&mut self, c_state: &ControllerState) {
-        if c_state.a_down {
-            self.go_left()
-        } else if c_state.d_down {
-            self.go_right()
-        } else {
-            self.lr_stop()
-        }
-
-        if c_state.w_down {
-            self.go_forward()
-        } else if c_state.s_down {
-            self.go_back()
-        } else {
-            self.fb_stop()
-        }
-
-        if c_state.up_down {
-            self.go_up()
-        } else if c_state.down_down {
-            self.go_down()
-        } else {
-            self.ud_stop()
-        }
-
-        if c_state.left_down {
-            self.go_ccw()
-        } else if c_state.right_down {
-            self.go_cw()
-        } else {
-            self.turn_stop()
-        }
-    }
-
-    pub fn send_command(&mut self, cmd: &Command) {
+    pub fn send_command(&mut self, cmd: &Drone) {
         if self.start_engines {
             cmd.send_stick(-1.0, -1.0, -1.0, 1.0, true).unwrap();
 
@@ -83,19 +54,26 @@ impl RCState {
                 self.start_engines = false;
             }
         } else {
-            cmd.send_stick(self.up_down, self.forward_back, self.left_right, self.turn, true).unwrap();
+            cmd.send_stick(
+                self.up_down,
+                self.forward_back,
+                self.left_right,
+                self.turn,
+                true,
+            )
+            .unwrap();
         }
     }
 }
 
 impl RCState {
-    pub fn lr_stop(&mut self) {
+    pub fn stop_left_right(&mut self) {
         self.left_right = 0.0;
     }
 
     pub fn go_left(&mut self) {
         if self.left_right > 0.0 {
-            self.lr_stop()
+            self.stop_left_right()
         } else {
             self.left_right = -1.0; // -= (self.max_speed + self.left_right) / 5.0;
         }
@@ -103,22 +81,30 @@ impl RCState {
 
     pub fn go_right(&mut self) {
         if self.left_right < 0.0 {
-            self.lr_stop()
+            self.stop_left_right()
         } else {
             // += to go left
             self.left_right = 1.0; //+= (self.max_speed - self.left_right) / 5.0;
         }
     }
+
+    ///
+    pub fn go_left_right(&mut self, value: f32) {
+        assert!(value <= 1.0);
+        assert!(value >= -1.0);
+
+        self.left_right = value;
+    }
 }
 
 impl RCState {
-    pub fn fb_stop(&mut self) {
+    pub fn stop_forward_backward(&mut self) {
         self.forward_back = 0.0;
     }
 
     pub fn go_back(&mut self) {
         if self.forward_back > 0.0 {
-            self.fb_stop()
+            self.stop_forward_backward()
         } else {
             // -= to go back
             self.forward_back = -1.0; //-= (self.max_speed + self.forward_back) / 5.0;
@@ -127,7 +113,7 @@ impl RCState {
 
     pub fn go_forward(&mut self) {
         if self.forward_back < 0.0 {
-            self.fb_stop()
+            self.stop_forward_backward()
         } else {
             // += to go left
             self.forward_back = 1.0; //+= (self.max_speed - self.forward_back) / 5.0;
@@ -136,13 +122,13 @@ impl RCState {
 }
 
 impl RCState {
-    pub fn ud_stop(&mut self) {
+    pub fn stop_up_down(&mut self) {
         self.up_down = 0.0;
     }
 
     pub fn go_down(&mut self) {
         if self.up_down > 0.0 {
-            self.ud_stop()
+            self.stop_up_down()
         } else {
             // -= to go down
             self.up_down = -1.0; //-= (self.max_speed + self.up_down) / 5.0;
@@ -151,7 +137,7 @@ impl RCState {
 
     pub fn go_up(&mut self) {
         if self.up_down < 0.0 {
-            self.ud_stop()
+            self.stop_up_down()
         } else {
             // += to go left
             self.up_down = 1.0; //+= (self.max_speed - self.up_down) / 5.0;
@@ -160,13 +146,13 @@ impl RCState {
 }
 
 impl RCState {
-    pub fn turn_stop(&mut self) {
+    pub fn stop_turn(&mut self) {
         self.turn = 0.0;
     }
 
     pub fn go_ccw(&mut self) {
         if self.turn > 0.0 {
-            self.turn_stop()
+            self.stop_turn()
         } else {
             // -= to go ccw
             self.turn = -1.0; //-= (self.max_speed + self.turn) / 5.0;
@@ -175,11 +161,10 @@ impl RCState {
 
     pub fn go_cw(&mut self) {
         if self.turn < 0.0 {
-            self.turn_stop()
+            self.stop_turn()
         } else {
             // += to go left
             self.turn = 1.0; //+= (self.max_speed - self.turn) / 5.0;
         }
     }
 }
-
