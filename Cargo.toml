@@ -1,10 +1,11 @@
 [package]
 name = "tello"
-version = "0.1.0"
+description = "SDK for intel Tello drone"
+version = "0.2.0"
 authors = ["Alex Halemba <alex-halemba@gmx.de>"]
 edition = "2018"
+repository = "https://github.com/Alexander89/rust-tello"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [lib]
 name = "tello"
 path = "src/lib.rs"

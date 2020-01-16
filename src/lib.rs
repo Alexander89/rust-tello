@@ -1,4 +1,4 @@
-//! Tello drone
+//! # Tello drone
 //!
 //! There are two interfaces for the tello drone. The text based and a
 //! non-public interface, used by the native app. The guys from the
@@ -15,7 +15,7 @@
 //!
 //! **Please keep in mind, advanced maneuvers require a bright environment. (Flip, Bounce, ...)**
 //!
-//! # Communication
+//! ## Communication
 //!
 //! When the drone gets an enable package (`drone.connect(11111);`), the Tello drone
 //! send data on two UDP channels. A the command channel (port: 8889) and B (WIP) the
@@ -24,7 +24,8 @@
 //! To receive the data, you have to poll the drone. Here is an example:
 //!
 //!
-//! ## Examples
+//! ### Example
+//!
 //! ```
 //! use tello::{Drone, Message, Package, PackageData, ResponseMsg};
 //! use std::time::Duration;
@@ -50,7 +51,7 @@
 //! }
 //! ```
 //!
-//! # Remote control
+//! ## Remote control
 //!
 //! the poll is not only receiving messages from the drone, it will also send some default-settings,
 //! replies with acknowledgements, triggers the key frames or send the remote-control state for the
@@ -63,7 +64,8 @@
 //! game pad or joystick.
 //!
 //!
-//! ## Examples
+//! ### Examples
+//!
 //! ```
 //! use sdl2::event::Event;
 //! use sdl2::keyboard::Keycode;
