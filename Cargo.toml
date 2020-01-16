@@ -1,13 +1,13 @@
 [package]
 name = "tello"
-description = "SDK for intel Tello drone"
+description = "SDK for intel DJI Tello drone using the native api"
 version = "0.2.0"
 authors = ["Alex Halemba <alex-halemba@gmx.de>"]
 edition = "2018"
 repository = "https://github.com/Alexander89/rust-tello"
 license-file = "./LICENCE"
 readme = "./README.md"
-keywords = ["Drone", "Tello"]
+keywords = ["Drone", "Tello", "DJI"]
 
 [lib]
 name = "tello"
@@ -18,7 +18,6 @@ name = "fly"
 path = "examples/fly/main.rs"
 
 [dependencies]
-bytes = "0.4"
 byteorder = "1.1"
 chrono = "0.4.0"
 
