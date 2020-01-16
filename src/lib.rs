@@ -6,18 +6,21 @@
 //! reverse engineer this interface and support other public repositories
 //! for go, python...
 //!
-//! This library combines the communication protocol and a remote-control
+//! This library combines the network protocol to communicate with the drone and get
+//! available meta data additionally and a remote-control framework is available to
+//! simplify the wiring to the keyboard or an joystick.
 //!
-//! In the sources you will find an example, how to create a SDL-UI and use
+//! In the sources you will find an example, how to create a SDL-Ui and use
 //! the keyboard to control the drone. You can run it with `cargo run --example fly`
 //!
 //! **Please keep in mind, advanced maneuvers require a bright environment. (Flip, Bounce, ...)**
 //!
 //! # Communication
 //!
-//! The Tello drone send data on two UDP channels. First the command channel (8889)
-//! and second (WIP) the video channel (default: 11111). In the AP mode, the drone
-//! will appear with the default ip 192.168.10.1. All send calls are done sync.
+//! When the drone gets an enable package (`drone.connect(11111);`), the Tello drone
+//! send data on two UDP channels. A the command channel (port: 8889) and B (WIP) the
+//! video channel (default: port: 11111). In the AP mode, the drone will appear with
+//! the default ip 192.168.10.1. All send calls are done synchronously.
 //! To receive the data, you have to poll the drone. Here is an example:
 //!
 //!
@@ -124,7 +127,7 @@ use chrono::prelude::*;
 use crc::{crc16, crc8};
 use drone_state::{FlightData, LightInfo, LogMessage, WifiInfo};
 use std::convert::TryFrom;
-use std::io::{Cursor, Read, Seek, SeekFrom, Write};
+use std::io::{Cursor, Read, Write, Seek, SeekFrom};
 use std::net::{SocketAddr, UdpSocket};
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::time::SystemTime;
@@ -460,7 +463,10 @@ impl Drone {
 
 impl Drone {
     pub fn take_off(&self) -> Result {
-        self.send(UdpCommand::new(CommandIds::TakeoffCmd, PackageTypes::X68))
+        self.send(UdpCommand::new(
+            CommandIds::TakeoffCmd,
+            PackageTypes::X68,
+        ))
     }
     pub fn throw_and_go(&self) -> Result {
         let mut cmd = UdpCommand::new(CommandIds::ThrowAndGoCmd, PackageTypes::X48);
@@ -500,10 +506,16 @@ impl Drone {
     }
 
     pub fn get_version(&self) -> Result {
-        self.send(UdpCommand::new(CommandIds::VersionMsg, PackageTypes::X48))
+        self.send(UdpCommand::new(
+            CommandIds::VersionMsg,
+            PackageTypes::X48,
+        ))
     }
     pub fn get_alt_limit(&self) -> Result {
-        self.send(UdpCommand::new(CommandIds::AltLimitMsg, PackageTypes::X68))
+        self.send(UdpCommand::new(
+            CommandIds::AltLimitMsg,
+            PackageTypes::X68,
+        ))
     }
     pub fn set_alt_limit(&self, limit: u8) -> Result {
         let mut cmd = UdpCommand::new(CommandIds::AltLimitCmd, PackageTypes::X68);
@@ -512,7 +524,10 @@ impl Drone {
         self.send(cmd)
     }
     pub fn get_att_angle(&self) -> Result {
-        self.send(UdpCommand::new(CommandIds::AttLimitMsg, PackageTypes::X68))
+        self.send(UdpCommand::new(
+            CommandIds::AttLimitMsg,
+            PackageTypes::X68,
+        ))
     }
     pub fn set_att_angle(&self) -> Result {
         let mut cmd = UdpCommand::new(CommandIds::AttLimitCmd, PackageTypes::X68);
@@ -633,10 +648,7 @@ impl Drone {
     pub fn start_video(&mut self) -> Result {
         self.video.enabled = true;
         self.video.last_video_poll = SystemTime::now();
-        self.send(UdpCommand::new_with_zero_sqn(
-            CommandIds::VideoStartCmd,
-            PackageTypes::X60,
-        ))
+        self.send(UdpCommand::new_with_zero_sqn(CommandIds::VideoStartCmd, PackageTypes::X60))
     }
 
     /// Same as start_video(), but a better name to poll the (SPS/PPS) for the video stream.
@@ -656,7 +668,8 @@ impl Drone {
     /// ```
     pub fn set_video_mode(&mut self, mode: VideoMode) -> Result {
         self.video.mode = mode.clone();
-        let mut cmd = UdpCommand::new_with_zero_sqn(CommandIds::VideoStartCmd, PackageTypes::X68);
+        let mut cmd =
+            UdpCommand::new_with_zero_sqn(CommandIds::VideoStartCmd, PackageTypes::X68);
         cmd.write_u8(mode as u8);
         self.send(cmd)
     }
@@ -767,12 +780,11 @@ impl Into<Vec<u8>> for UdpCommand {
     fn into(self) -> Vec<u8> {
         let mut data = {
             let lng = self.inner.len();
-            let data: &[u8] = &self.inner;
+            let data: &[u8]= &self.inner;
 
             let mut cur = Cursor::new(Vec::new());
             cur.write_u8(START_OF_PACKET).expect("");
-            cur.write_u16::<LittleEndian>((lng as u16 + 11) << 3)
-                .expect("");
+            cur.write_u16::<LittleEndian>((lng as u16 + 11) << 3).expect("");
             cur.write_u8(crc8(cur.clone().into_inner())).expect("");
             cur.write_u8(self.pkt_type as u8).expect("");
             cur.write_u16::<LittleEndian>(self.cmd as u16).expect("");
@@ -791,7 +803,8 @@ impl Into<Vec<u8>> for UdpCommand {
             cur.into_inner()
         };
 
-        data.write_u16::<LittleEndian>(crc16(data.clone()))
+        data
+            .write_u16::<LittleEndian>(crc16(data.clone()))
             .expect("");
 
         data
