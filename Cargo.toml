@@ -5,6 +5,9 @@ version = "0.2.0"
 authors = ["Alex Halemba <alex-halemba@gmx.de>"]
 edition = "2018"
 repository = "https://github.com/Alexander89/rust-tello"
+license-file = "./LICENCE"
+readme = "./README.md"
+keywords = ["Drone", "Tello"]
 
 [lib]
 name = "tello"
