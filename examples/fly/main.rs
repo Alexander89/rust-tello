@@ -47,12 +47,14 @@ fn main() -> Result<(), String> {
             .unwrap()
     ).unwrap();
     let control_target = Rect::new(10, 0, 240, 112);
-    let control_texture = texture_creator.create_texture_from_surface(
-        &font
-            .render("w/s: forward/back\na/d: left/right\nup/down: up/down\nleft/right: turn")
-            .blended_wrapped(Color::RGB(0, 0, 0), 240)
-            .unwrap()
-    ).unwrap();
+    let control_texture = texture_creator
+        .create_texture_from_surface(
+            &font
+                .render("w/s: forward/back\na/d: left/right\nup/down: up/down\nleft/right: turn")
+                .blended_wrapped(Color::RGB(0, 0, 0), 240)
+                .unwrap(),
+        )
+        .unwrap();
     let stats_target = Rect::new(50, WINDOW_HEIGHT as i32 - 40, WINDOW_WIDTH - 100, 40);
 
     let mut event_pump = sdl_context.event_pump()?;
@@ -71,7 +73,9 @@ fn main() -> Result<(), String> {
         if let Some(data) = drone.drone_meta.get_flight_data() {
             let d = format!("{:?}", data);
             let surface_stats = font.render(d.deref()).blended(Color::RGB(0, 0, 0)).unwrap();
-            let texture_stats = texture_creator.create_texture_from_surface(&surface_stats).unwrap();
+            let texture_stats = texture_creator
+                .create_texture_from_surface(&surface_stats)
+                .unwrap();
             canvas.copy(&texture_stats, None, Some(stats_target))?;
         }
 
@@ -231,7 +235,6 @@ pub struct ControllerState {
 }
 
 impl ControllerState {
-
     /// handle the SDL key down event
     pub fn handle_key_down(&mut self, keycode: Keycode) {
         match keycode {

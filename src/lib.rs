@@ -11,6 +11,8 @@
 //! In the sources you will find an example, how to create a SDL-UI and use
 //! the keyboard to control the drone. You can run it with `cargo run --example fly`
 //!
+//! **Please keep in mind, advanced maneuvers require a bright environment. (Flip, Bounce, ...)**
+//!
 //! # Communication
 //!
 //! The Tello drone send data on two UDP channels. First the command channel (8889)
@@ -121,8 +123,8 @@ use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use chrono::prelude::*;
 use crc::{crc16, crc8};
 use drone_state::{FlightData, LightInfo, LogMessage, WifiInfo};
-use std::convert::{TryFrom};
-use std::io::{Cursor, Read, Write, Seek, SeekFrom};
+use std::convert::TryFrom;
+use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 use std::net::{SocketAddr, UdpSocket};
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::time::SystemTime;
@@ -138,8 +140,8 @@ static SEQ_NO: AtomicU16 = AtomicU16::new(1);
 
 type Result = std::result::Result<(), ()>;
 
+/// The video data itself is just H264 encoded YUV420p
 #[derive(Debug, Clone)]
-// The video data itself is just H264 encoded YUV420p
 struct VideoSettings {
     pub port: u16,
     pub enabled: bool,
@@ -165,8 +167,9 @@ pub struct Drone {
     status_counter: u32,
 }
 
-pub const START_OF_PACKET: u8 = 0xcc;
+const START_OF_PACKET: u8 = 0xcc;
 
+/// known Command ids. Not all of them are implemented.
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[repr(u16)]
 pub enum CommandIds {
@@ -274,13 +277,15 @@ impl From<u16> for CommandIds {
         }
     }
 }
-
+/// unformatted response from the drone.
 #[derive(Debug, Clone)]
 pub enum ResponseMsg {
     Connected(String),
     UnknownCommand(CommandIds),
 }
 
+/// The package type bitmask discripe the payload and how the drone should behave.
+/// More info are available on the https://tellopilots.com webpage
 #[derive(Debug, Clone, Copy)]
 #[repr(u8)]
 pub enum PackageTypes {
@@ -291,26 +296,27 @@ pub enum PackageTypes {
     X68 = 0x68,
 }
 
-//Flip commands taken from Go version of code
+/// Flip commands taken from Go version of code
 pub enum Flip {
-    //flips forward.
+    /// flips forward.
     Forward = 0,
-    //flips left.
+    /// flips left.
     Left = 1,
-    //flips backwards.
+    /// flips backwards.
     Back = 2,
-    //flips to the right.
+    /// flips to the right.
     Right = 3,
-    //flips forwards and to the left.
+    /// flips forwards and to the left.
     ForwardLeft = 4,
-    //flips backwards and to the left.
+    /// flips backwards and to the left.
     BackLeft = 5,
-    //flips backwards and to the right.
+    /// flips backwards and to the right.
     BackRight = 6,
-    //flips forwards and to the right.
+    /// flips forwards and to the right.
     ForwardRight = 7,
 }
 
+/// available modes for the tello drone
 #[derive(Debug, Clone)]
 pub enum VideoMode {
     M960x720 = 0,
@@ -454,10 +460,7 @@ impl Drone {
 
 impl Drone {
     pub fn take_off(&self) -> Result {
-        self.send(UdpCommand::new(
-            CommandIds::TakeoffCmd,
-            PackageTypes::X68,
-        ))
+        self.send(UdpCommand::new(CommandIds::TakeoffCmd, PackageTypes::X68))
     }
     pub fn throw_and_go(&self) -> Result {
         let mut cmd = UdpCommand::new(CommandIds::ThrowAndGoCmd, PackageTypes::X48);
@@ -497,16 +500,10 @@ impl Drone {
     }
 
     pub fn get_version(&self) -> Result {
-        self.send(UdpCommand::new(
-            CommandIds::VersionMsg,
-            PackageTypes::X48,
-        ))
+        self.send(UdpCommand::new(CommandIds::VersionMsg, PackageTypes::X48))
     }
     pub fn get_alt_limit(&self) -> Result {
-        self.send(UdpCommand::new(
-            CommandIds::AltLimitMsg,
-            PackageTypes::X68,
-        ))
+        self.send(UdpCommand::new(CommandIds::AltLimitMsg, PackageTypes::X68))
     }
     pub fn set_alt_limit(&self, limit: u8) -> Result {
         let mut cmd = UdpCommand::new(CommandIds::AltLimitCmd, PackageTypes::X68);
@@ -515,10 +512,7 @@ impl Drone {
         self.send(cmd)
     }
     pub fn get_att_angle(&self) -> Result {
-        self.send(UdpCommand::new(
-            CommandIds::AttLimitMsg,
-            PackageTypes::X68,
-        ))
+        self.send(UdpCommand::new(CommandIds::AttLimitMsg, PackageTypes::X68))
     }
     pub fn set_att_angle(&self) -> Result {
         let mut cmd = UdpCommand::new(CommandIds::AttLimitCmd, PackageTypes::X68);
@@ -639,7 +633,10 @@ impl Drone {
     pub fn start_video(&mut self) -> Result {
         self.video.enabled = true;
         self.video.last_video_poll = SystemTime::now();
-        self.send(UdpCommand::new_with_zero_sqn(CommandIds::VideoStartCmd, PackageTypes::X60))
+        self.send(UdpCommand::new_with_zero_sqn(
+            CommandIds::VideoStartCmd,
+            PackageTypes::X60,
+        ))
     }
 
     /// Same as start_video(), but a better name to poll the (SPS/PPS) for the video stream.
@@ -659,8 +656,7 @@ impl Drone {
     /// ```
     pub fn set_video_mode(&mut self, mode: VideoMode) -> Result {
         self.video.mode = mode.clone();
-        let mut cmd =
-            UdpCommand::new_with_zero_sqn(CommandIds::VideoStartCmd, PackageTypes::X68);
+        let mut cmd = UdpCommand::new_with_zero_sqn(CommandIds::VideoStartCmd, PackageTypes::X68);
         cmd.write_u8(mode as u8);
         self.send(cmd)
     }
@@ -771,11 +767,12 @@ impl Into<Vec<u8>> for UdpCommand {
     fn into(self) -> Vec<u8> {
         let mut data = {
             let lng = self.inner.len();
-            let data: &[u8]= &self.inner;
+            let data: &[u8] = &self.inner;
 
             let mut cur = Cursor::new(Vec::new());
             cur.write_u8(START_OF_PACKET).expect("");
-            cur.write_u16::<LittleEndian>((lng as u16 + 11) << 3).expect("");
+            cur.write_u16::<LittleEndian>((lng as u16 + 11) << 3)
+                .expect("");
             cur.write_u8(crc8(cur.clone().into_inner())).expect("");
             cur.write_u8(self.pkt_type as u8).expect("");
             cur.write_u16::<LittleEndian>(self.cmd as u16).expect("");
@@ -794,14 +791,14 @@ impl Into<Vec<u8>> for UdpCommand {
             cur.into_inner()
         };
 
-        data
-            .write_u16::<LittleEndian>(crc16(data.clone()))
+        data.write_u16::<LittleEndian>(crc16(data.clone()))
             .expect("");
 
         data
     }
 }
 
+/// Data / command package received from the drone with parsed data (if supported and known)
 #[derive(Debug, Clone)]
 pub struct Package {
     pub cmd: CommandIds,
@@ -810,10 +807,12 @@ pub struct Package {
     pub data: PackageData,
 }
 
+/// Incoming message can be Data, a response from the drone or a VideoFrame
 #[derive(Debug, Clone)]
 pub enum Message {
     Data(Package),
     Response(ResponseMsg),
+    Frame(Vec<u8>),
 }
 
 impl TryFrom<Vec<u8>> for Message {
@@ -886,6 +885,7 @@ impl TryFrom<Vec<u8>> for Message {
     }
 }
 
+/// Parsed data from the drone.
 #[derive(Debug, Clone)]
 pub enum PackageData {
     NoData(),

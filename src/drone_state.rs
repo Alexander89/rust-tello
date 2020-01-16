@@ -2,7 +2,6 @@ use super::PackageData;
 use byteorder::{LittleEndian, ReadBytesExt};
 use std::io::{BufRead, Cursor, Seek, SeekFrom};
 
-///
 /// Represents the last received meta data from the drone
 ///
 #[derive(Debug, Clone, Default)]
@@ -43,7 +42,6 @@ impl DroneMeta {
         };
     }
 }
-
 
 fn int16(val0: u8, val1: u8) -> i16 {
     if val1 != 0 {
@@ -147,12 +145,15 @@ impl From<Vec<u8>> for FlightData {
     }
 }
 
+/// current strength of the wifi signal and distortion.
+/// When the drone is in the AP mode, the max strength value is 90
 #[derive(Debug, Clone)]
 pub struct WifiInfo {
     strength: u8,
     disturb: u8,
 }
 impl From<Vec<u8>> for WifiInfo {
+    /// parse the incoming network package
     fn from(data: Vec<u8>) -> WifiInfo {
         WifiInfo {
             strength: data[0],
@@ -161,22 +162,27 @@ impl From<Vec<u8>> for WifiInfo {
     }
 }
 
+/// some features like a flip or bouncing is only available when the battery is charged and there is enough light
+/// check the FlightData for the battery state
 #[derive(Debug, Clone)]
 pub struct LightInfo {
     good: bool,
 }
 impl From<Vec<u8>> for LightInfo {
+    /// parse the incoming network package
     fn from(data: Vec<u8>) -> LightInfo {
         LightInfo { good: data[0] == 0 }
     }
 }
 
+/// not complete parse log message. This message is send frequently from the drone
 #[derive(Debug, Clone)]
 pub struct LogMessage {
     pub id: u16,
     pub message: String,
 }
 impl From<Vec<u8>> for LogMessage {
+    /// parse the incoming network package
     fn from(data: Vec<u8>) -> LogMessage {
         let mut cur = Cursor::new(data);
         let id: u16 = cur.read_u16::<LittleEndian>().unwrap();
@@ -185,7 +191,10 @@ impl From<Vec<u8>> for LogMessage {
         cur.read_until(0, &mut msg).unwrap();
         LogMessage {
             id,
-            message: String::from_utf8(msg).unwrap().trim_matches('\u{0}').to_string(),
+            message: String::from_utf8(msg)
+                .unwrap()
+                .trim_matches('\u{0}')
+                .to_string(),
         }
     }
 }

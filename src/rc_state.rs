@@ -1,7 +1,6 @@
 use std::time::SystemTime;
 
 /// represent the current input to remote control the drone.
-///
 #[derive(Clone, Debug, Default)]
 pub struct RCState {
     left_right: f32,
