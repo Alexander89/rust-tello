@@ -1,150 +1,180 @@
-use std::net::UdpSocket;
+use std::time::SystemTime;
 
-#[derive(Clone, Debug)]
+/// represent the current input to remote control the drone.
+#[derive(Clone, Debug, Default)]
 pub struct RCState {
     left_right: f32,
     forward_back: f32,
     turn: f32,
     up_down: f32,
 
-    max_speed: f32,
+    start_engines: bool,
+    start_engines_set_time: Option<SystemTime>,
 }
 
 impl RCState {
-    pub fn new() -> RCState {
-        RCState {
-            left_right: 0.0,
-            forward_back: 0.0,
-            turn: 0.0,
-            up_down: 0.0,
-            max_speed: 100.0,
+    /// set the rc-controller to the mode to hold down the key-combination to do an manual take_off.
+    ///
+    pub fn start_engines(&mut self) {
+        self.start_engines = true;
+        self.start_engines_set_time = Some(SystemTime::now());
+    }
+
+    /// returns the current stick parameter to send them to the drone
+    ///
+    /// Actually, this is an workaround to keep the start_engines in this struct and
+    /// don't move them to the Drone it self
+    pub fn get_stick_parameter(&mut self) -> (f32, f32, f32, f32, bool) {
+        if self.start_engines {
+            if let Some(start) = self.start_engines_set_time {
+                let elapsed = SystemTime::now().duration_since(start);
+                if let Ok(time) = elapsed {
+                    if time.as_millis() > 350 {
+                        self.start_engines = false;
+                    }
+                } else {
+                    self.start_engines = false;
+                }
+            } else {
+                self.start_engines = false;
+            }
+            (-1.0, -1.0, -1.0, 1.0, true)
+        } else {
+            (
+                self.up_down,
+                self.forward_back,
+                self.left_right,
+                self.turn,
+                true,
+            )
         }
     }
 
-    pub fn publish(self: &RCState, socket: &UdpSocket) {
-        let command = format!("rc {:.0} {:.0} {:.0} {:.0}", self.left_right, self.forward_back, self.up_down, self.turn);
-        //println!("command {}", command);
-        socket.send(&command.into_bytes()).unwrap();
-    }
-}
-
-impl RCState {
-    pub fn lr_stop(self: &RCState) -> RCState {
-        let mut new = self.clone();
-        new.left_right = 0.0;
-        new
+    /// stop moving left or right by setting the axis to 0.0
+    pub fn stop_left_right(&mut self) {
+        self.left_right = 0.0;
     }
 
-    pub fn go_left(self: &RCState) -> RCState {
+    /// set a fixed value of -1.0 to the left right axis to fly to the left
+    pub fn go_left(&mut self) {
         if self.left_right > 0.0 {
-            self.lr_stop()
+            self.stop_left_right()
         } else {
-            let mut go_left = self.clone();
-            // -= to go left
-            go_left.left_right  -= (go_left.max_speed + go_left.left_right) / 5.0;
-            go_left
+            self.left_right = -1.0;
         }
     }
 
-    pub fn go_right(self: &RCState) -> RCState {
+    /// set a fixed value of 1.0 to the left right axis to fly to the right
+    pub fn go_right(&mut self) {
         if self.left_right < 0.0 {
-            self.lr_stop()
+            self.stop_left_right()
         } else {
-            let mut go_right = self.clone();
-            // += to go left
-            go_right.left_right += (go_right.max_speed - go_right.left_right) / 5.0;
-            go_right
+            self.left_right = 1.0;
         }
     }
-}
 
-impl RCState {
-    pub fn fb_stop(self: &RCState) -> RCState {
-        let mut new = self.clone();
-        new.forward_back = 0.0;
-        new
+    /// set a analog value to the left right axis
+    /// this value has to be between -1 and 1 (including), where -1 is left and 1 is right
+    pub fn go_left_right(&mut self, value: f32) {
+        assert!(value <= 1.0);
+        assert!(value >= -1.0);
+
+        self.left_right = value;
     }
 
-    pub fn go_back(self: &RCState) -> RCState {
+    /// stop moving forward or back by setting the axis to 0.0
+    pub fn stop_forward_back(&mut self) {
+        self.forward_back = 0.0;
+    }
+
+    /// set a fixed value of -1.0 to the forward and back axis to fly back
+    pub fn go_back(&mut self) {
         if self.forward_back > 0.0 {
-            self.fb_stop()
+            self.stop_forward_back()
         } else {
-            let mut go_back = self.clone();
-            // -= to go back
-            go_back.forward_back  -= (go_back.max_speed + go_back.forward_back) / 5.0;
-            go_back
+            self.forward_back = -1.0;
         }
     }
 
-    pub fn go_forward(self: &RCState) -> RCState {
+    /// set a fixed value of 1.0 to the forward and back axis to fly forward
+    pub fn go_forward(&mut self) {
         if self.forward_back < 0.0 {
-            self.fb_stop()
+            self.stop_forward_back()
         } else {
-            let mut go_forward = self.clone();
-            // += to go left
-            go_forward.forward_back += (go_forward.max_speed - go_forward.forward_back) / 5.0;
-            go_forward
+            self.forward_back = 1.0;
         }
     }
-}
 
-impl RCState {
-    pub fn ud_stop(self: &RCState) -> RCState {
-        let mut new = self.clone();
-        new.up_down = 0.0;
-        new
+    /// set a analog value to the forward or back axis
+    /// this value has to be between -1 and 1 (including), where -1 is back and 1 is forward
+    pub fn go_forward_back(&mut self, value: f32) {
+        assert!(value <= 1.0);
+        assert!(value >= -1.0);
+
+        self.forward_back = value;
     }
 
-    pub fn go_down(self: &RCState) -> RCState {
+    /// stop moving up or down by setting the axis to 0.0
+    pub fn stop_up_down(&mut self) {
+        self.up_down = 0.0;
+    }
+
+    /// set a fixed value of -1.0 to the up and down axis to raise up
+    pub fn go_down(&mut self) {
         if self.up_down > 0.0 {
-            self.ud_stop()
+            self.stop_up_down()
         } else {
-            let mut go_down = self.clone();
-            // -= to go down
-            go_down.up_down  -= (go_down.max_speed + go_down.up_down) / 5.0;
-            go_down
+            self.up_down = -1.0;
         }
     }
 
-    pub fn go_up(self: &RCState) -> RCState {
+    /// set a fixed value of 1.0 to the up and down axis to go down
+    pub fn go_up(&mut self) {
         if self.up_down < 0.0 {
-            self.ud_stop()
+            self.stop_up_down()
         } else {
-            let mut go_up = self.clone();
-            // += to go left
-            go_up.up_down += (go_up.max_speed - go_up.up_down) / 5.0;
-            go_up
+            self.up_down = 1.0;
         }
     }
-}
 
-impl RCState {
-    pub fn turn_stop(self: &RCState) -> RCState {
-        let mut new = self.clone();
-        new.turn = 0.0;
-        new
+    /// set a analog value to the up or down axis
+    /// this value has to be between -1 and 1 (including), where -1 is going down and 1 is flying up
+    pub fn go_up_down(&mut self, value: f32) {
+        assert!(value <= 1.0);
+        assert!(value >= -1.0);
+
+        self.up_down = value;
     }
 
-    pub fn go_ccw(self: &RCState) -> RCState {
+    /// stop turning by setting it to 0.0
+    pub fn stop_turn(&mut self) {
+        self.turn = 0.0;
+    }
+
+    /// set a fixed value of -1.0 to the turn axis to turn counter clock wise
+    pub fn go_ccw(&mut self) {
         if self.turn > 0.0 {
-            self.turn_stop()
+            self.stop_turn()
         } else {
-            let mut go_ccw = self.clone();
-            // -= to go ccw
-            go_ccw.turn -= (go_ccw.max_speed + go_ccw.turn) / 5.0;
-            go_ccw
+            self.turn = -1.0;
         }
     }
 
-    pub fn go_cw(self: &RCState) -> RCState {
+    /// set a fixed value of 1.0 to the forward and back axis to turn clock wise
+    pub fn go_cw(&mut self) {
         if self.turn < 0.0 {
-            self.turn_stop()
+            self.stop_turn()
         } else {
-            let mut go_cw = self.clone();
-            // += to go left
-            go_cw.turn += (go_cw.max_speed - go_cw.turn) / 5.0;
-            go_cw
+            self.turn = 1.0;
         }
+    }
+
+    /// Set a analog value to turn the drone
+    /// This value has to be between -1 and 1 (including), where -1 is turning ccw and 1 is turning cw
+    pub fn turn(&mut self, value: f32) {
+        assert!(value <= 1.0);
+        assert!(value >= -1.0);
+
+        self.turn = value;
     }
 }
-
