@@ -18,7 +18,7 @@
 //! ## Communication
 //!
 //! When the drone gets an enable package (`drone.connect(11111);`), the Tello drone
-//! send data on two UDP channels. A the command channel (port: 8889) and B (WIP) the
+//! send data on two UDP channels. A the command channel (port: 8889) and B the
 //! video channel (default: port: 11111). In the AP mode, the drone will appear with
 //! the default ip 192.168.10.1. All send calls are done synchronously.
 //! To receive the data, you have to poll the drone. Here is an example:
@@ -39,6 +39,9 @@
 //!                 Message::Data(Package {data: PackageData::FlightData(d), ..}) => {
 //!                     println!("battery {}", d.battery_percentage);
 //!                 }
+//!                 Message::Frame(frame_id, data) => {
+//!                     println!("frame {} {:?}", frame_id, data);
+//!                 }
 //!                 Message::Response(ResponseMsg::Connected(_)) => {
 //!                     println!("connected");
 //!                     drone.throw_and_go().unwrap();
@@ -53,7 +56,7 @@
 //!
 //! ## Remote control
 //!
-//! the poll is not only receiving messages from the drone, it will also send some default-settings,
+//! The poll is not only receiving messages from the drone, it will also send some default-settings,
 //! replies with acknowledgements, triggers the key frames or send the remote-control state for the
 //! live move commands.
 //!
@@ -160,7 +163,9 @@ struct VideoSettings {
 #[derive(Debug)]
 pub struct Drone {
     socket: UdpSocket,
+    video_socket: Option<UdpSocket>,
     video: VideoSettings,
+    last_stick_command: SystemTime,
 
     /// remote control values to control the drone
     pub rc_state: RCState,
@@ -168,7 +173,7 @@ pub struct Drone {
     /// current meta data from the drone
     pub drone_meta: DroneMeta,
 
-    // used to query some metadata delayed after connecting
+    /// used to query some metadata delayed after connecting
     status_counter: u32,
 }
 
@@ -344,8 +349,7 @@ impl Drone {
     /// drone.take_off();
     /// ```
     pub fn new(ip: &str) -> Drone {
-        let bind_addr = SocketAddr::from(([0, 0, 0, 0], 8889));
-        let socket = UdpSocket::bind(&bind_addr).expect("couldn't bind to command address");
+        let socket = UdpSocket::bind(&SocketAddr::from(([0, 0, 0, 0], 8889))).expect("couldn't bind to command address");
         socket.set_nonblocking(true).unwrap();
         socket.connect(ip).expect("connect command socket failed");
 
@@ -363,8 +367,10 @@ impl Drone {
 
         Drone {
             socket,
+            video_socket: None,
             video,
             status_counter: 0,
+            last_stick_command: SystemTime::now(),
             rc_state,
             drone_meta,
         }
@@ -380,12 +386,17 @@ impl Drone {
         cur.set_position(9);
         cur.write_u16::<LittleEndian>(video_port).unwrap();
         self.video.port = video_port;
-        println!("connect command {:?}", data);
+        self.start_video().unwrap();
+
+        let video_socket = UdpSocket::bind(&SocketAddr::from(([0, 0, 0, 0], self.video.port))).expect("couldn't bind to video address");
+        video_socket.set_nonblocking(true).unwrap();
+        self.video_socket = Some(video_socket);
+
         self.socket.send(&data).expect("network should be usable")
     }
 
-    // convert the command into a Vec<u8> and send it to the drone.
-    // this is mostly for internal purposes, but you can implement missing commands your self
+    /// convert the command into a Vec<u8> and send it to the drone.
+    /// this is mostly for internal purposes, but you can implement missing commands your self
     pub fn send(&self, command: UdpCommand) -> Result {
         let data: Vec<u8> = command.into();
 
@@ -396,43 +407,107 @@ impl Drone {
         }
     }
 
-    // when the drone send the current log stats, it is required to ack this.
-    // The logic is implemented in the poll function.
+    /// when the drone send the current log stats, it is required to ack this.
+    /// The logic is implemented in the poll function.
     fn send_ack_log(&self, id: u16) -> Result {
         let mut cmd = UdpCommand::new_with_zero_sqn(CommandIds::LogHeaderMsg, PackageTypes::X50);
         cmd.write_u16(id);
         self.send(cmd)
     }
 
+    /// if there are some data in the udp-socket, all of one frame are collected and returned as UDP-Package
+    fn receive_video_frame(&self, socket: &UdpSocket)-> Option<Message> {
+        let mut read_buf = [0; 1440];
+
+        socket.set_nonblocking(true).unwrap();
+        if let Ok(received) = socket.recv(&mut read_buf) {
+
+            let active_frame_id = read_buf[0];
+            let mut sqn = read_buf[1];
+            let mut frame_buffer = read_buf[2..received].to_owned();
+
+            // should start with 0. otherwise delete frame package
+            if sqn != 0 {
+                return None
+            }
+
+            socket.set_nonblocking(false).unwrap();
+            'recVideo : loop {
+                if sqn >= 120 {
+                    break 'recVideo Some( Message::Frame(active_frame_id, frame_buffer) )
+                }
+                if let Ok(received) = socket.recv(&mut read_buf) {
+                    let frame_id = read_buf[0];
+                    if frame_id != active_frame_id {
+                        // drop frame to stop data mess
+                        break 'recVideo None
+                    }
+
+                    sqn = read_buf[1];
+                    let mut data = read_buf[2..received].to_owned();
+
+
+                    frame_buffer.append(&mut data);
+
+                } else {
+                    break 'recVideo None
+                }
+            }
+        } else {
+            None
+        }
+    }
+
+    /// poll data from drone and send common data to the drone
+    /// - every 33 millis, the sick command is send to the drone
+    /// - every 1 sec, a key-frame is requested from the drone
+    /// - logMessage packages are replied immediately with an ack package
+    /// - dateTime packages are replied immediately with the local SystemTime
+    /// - after the third status message some default data are send to the drone
+    ///
+    /// To receive a smooth video stream, you should poll at least 35 times per second
     pub fn poll(&mut self) -> Option<Message> {
-        let (pitch, nick, roll, yaw, fast) = self.rc_state.get_stick_parameter();
-        self.send_stick(pitch, nick, roll, yaw, fast).unwrap();
-        // poll I-Frame  every second
+        let now = SystemTime::now();
+
+        let delta = now.duration_since(self.last_stick_command).unwrap();
+        if delta.as_millis() > 1000 / 30 {
+            let (pitch, nick, roll, yaw, fast) = self.rc_state.get_stick_parameter();
+            self.send_stick(pitch, nick, roll, yaw, fast).unwrap();
+            self.last_stick_command = now.clone();
+        }
+
+        // poll I-Frame every second and receive udp frame data
         if self.video.enabled {
-            let now = SystemTime::now();
             let delta = now.duration_since(self.video.last_video_poll).unwrap();
             if delta.as_secs() > 1 {
                 self.video.last_video_poll = now;
-                self.start_video().unwrap();
+                self.poll_key_frame().unwrap();
+            }
+            if let Some(socket) = self.video_socket.as_ref() {
+                let frame = self.receive_video_frame(&socket);
+                if frame.is_some() {
+                    return frame;
+                }
             }
         }
 
-        let mut meta_buf = [0; 1440];
-        if let Ok(received) = self.socket.recv(&mut meta_buf) {
-            let data = meta_buf[..received].to_vec();
+        // receive and process data on command socket
+        let mut read_buf = [0; 1440];
+        if let Ok(received) = self.socket.recv(&mut read_buf) {
+            let data = read_buf[..received].to_vec();
             match Message::try_from(data) {
                 Ok(msg) => {
-                    match msg.clone() {
+                    match &msg {
                         Message::Response(ResponseMsg::Connected(_)) => self.status_counter = 0,
                         Message::Data(Package {
                             data: PackageData::LogMessage(log),
                             ..
                         }) => self.send_ack_log(log.id).unwrap(),
-                        Message::Data(Package { cmd, .. }) if cmd == CommandIds::TimeCmd => {
+                        Message::Data(Package { cmd, .. }) if *cmd == CommandIds::TimeCmd => {
                             self.send_date_time().unwrap()
                         }
                         Message::Data(Package { cmd, data, .. })
-                            if cmd == CommandIds::FlightMsg =>
+                            if *cmd == CommandIds::FlightMsg =>
                         {
                             self.drone_meta.update(&data);
 
@@ -561,10 +636,12 @@ impl Drone {
         ))
     }
 
-    // pitch up/down -1 -> 1
-    // nick forward/backward -1 -> 1
-    // roll right/left -1 -> 1
-    // yaw cw/ccw -1 -> 1
+    /// send the stick command via udp to the drone
+    ///
+    /// pitch up/down -1 -> 1
+    /// nick forward/backward -1 -> 1
+    /// roll right/left -1 -> 1
+    /// yaw cw/ccw -1 -> 1
     pub fn send_stick(&self, pitch: f32, nick: f32, roll: f32, yaw: f32, fast: bool) -> Result {
         let mut cmd = UdpCommand::new_with_zero_sqn(CommandIds::StickCmd, PackageTypes::X60);
 
@@ -599,14 +676,13 @@ impl Drone {
         cmd.write_u8(((packed_axis >> 32) & 0xFF) as u8);
         cmd.write_u8(((packed_axis >> 40) & 0xFF) as u8);
 
-        let cmd = Drone::add_time(cmd);
-        self.send(cmd)
+        self.send(Drone::add_time(cmd))
     }
-    // SendDateTime sends the current date/time to the drone.
+
+    /// SendDateTime sends the current date/time to the drone.
     pub fn send_date_time(&self) -> Result {
         let command = UdpCommand::new(CommandIds::TimeCmd, PackageTypes::X50);
-        let command = Drone::add_date_time(command);
-        self.send(command)
+        self.send(Drone::add_date_time(command))
     }
 
     pub fn add_time(mut command: UdpCommand) -> UdpCommand {
@@ -654,6 +730,8 @@ impl Drone {
     }
 
     /// Same as start_video(), but a better name to poll the (SPS/PPS) for the video stream.
+    ///
+    /// This is automatically called in the poll function every second.
     pub fn poll_key_frame(&mut self) -> Result {
         self.start_video()
     }
@@ -827,11 +905,11 @@ pub struct Package {
 pub enum Message {
     Data(Package),
     Response(ResponseMsg),
-    Frame(Vec<u8>),
+    Frame(u8, Vec<u8>),
 }
 
 impl TryFrom<Vec<u8>> for Message {
-    type Error = &'static str;
+    type Error = String;
 
     fn try_from(data: Vec<u8>) -> std::result::Result<Self, Self::Error> {
         let mut cur = Cursor::new(data);
@@ -890,12 +968,8 @@ impl TryFrom<Vec<u8>> for Message {
                 return Ok(Message::Response(ResponseMsg::UnknownCommand(command)));
             }
 
-            unsafe {
-                println!("data len {:?}", data.len());
-                let msg = String::from_utf8_unchecked(data.clone()[0..5].to_vec());
-                println!("data {:?}", msg);
-            }
-            Err("invalid package")
+            let msg = String::from_utf8(data.clone()[0..5].to_vec()).unwrap_or_default();
+            Err(format!("invalid package {:x?}", msg))
         }
     }
 }

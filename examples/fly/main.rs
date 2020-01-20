@@ -5,6 +5,7 @@ use sdl2::rect::Rect;
 use std::path::Path;
 use std::string::String;
 use std::time::Duration;
+use std::net::{SocketAddr, UdpSocket};
 
 use std::ops::Deref;
 use tello::{Drone, Flip, Message, Package, PackageData, RCState, ResponseMsg};
@@ -206,6 +207,9 @@ fn main() -> Result<(), String> {
                 Message::Data(d) /*if d.cmd != CommandIds::LogHeaderMsg*/ => {
                     println!("msg {:?}", d.clone());
                 }
+                Message::Frame(frame_id, d)=> {
+                    println!("frame {} {:?}", frame_id, &d[..15]);
+                }
                 Message::Response(ResponseMsg::Connected(_)) => {
                     println!("connected");
                 }
@@ -214,7 +218,7 @@ fn main() -> Result<(), String> {
         }
 
         canvas.present();
-        ::std::thread::sleep(Duration::new(0, 1_000_000_000u32 / 20));
+        ::std::thread::sleep(Duration::from_millis(10));
     }
 
     Ok(())
