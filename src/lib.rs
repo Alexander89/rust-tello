@@ -157,6 +157,8 @@ struct VideoSettings {
     pub level: u8,
     pub encoding_rate: u8,
     pub last_video_poll: SystemTime,
+    pub last_frame_id: u8,
+    pub frame_counter_overflow: u32,
 }
 
 /// Main connection and controller for the drone
@@ -360,6 +362,8 @@ impl Drone {
             level: 1,
             encoding_rate: 4,
             last_video_poll: SystemTime::now(),
+            last_frame_id: 0,
+            frame_counter_overflow: 0,
         };
 
         let rc_state = RCState::default();
@@ -416,13 +420,20 @@ impl Drone {
     }
 
     /// if there are some data in the udp-socket, all of one frame are collected and returned as UDP-Package
-    fn receive_video_frame(&self, socket: &UdpSocket)-> Option<Message> {
+    fn receive_video_frame(&mut self)-> Option<Message> {
         let mut read_buf = [0; 1440];
+        let socket = self.video_socket.as_ref().unwrap();
 
         socket.set_nonblocking(true).unwrap();
         if let Ok(received) = socket.recv(&mut read_buf) {
 
             let active_frame_id = read_buf[0];
+
+            if active_frame_id < 100 && active_frame_id < self.video.last_frame_id {
+                self.video.frame_counter_overflow += 1;
+            }
+            self.video.last_frame_id = active_frame_id;
+
             let mut sqn = read_buf[1];
             let mut frame_buffer = read_buf[2..received].to_owned();
 
@@ -434,7 +445,8 @@ impl Drone {
             socket.set_nonblocking(false).unwrap();
             'recVideo : loop {
                 if sqn >= 120 {
-                    break 'recVideo Some( Message::Frame(active_frame_id, frame_buffer) )
+                    let frame_id: u32 = active_frame_id as u32 + 255 * self.video.frame_counter_overflow;
+                    break 'recVideo Some( Message::Frame(frame_id, frame_buffer) )
                 }
                 if let Ok(received) = socket.recv(&mut read_buf) {
                     let frame_id = read_buf[0];
@@ -483,8 +495,8 @@ impl Drone {
                 self.video.last_video_poll = now;
                 self.poll_key_frame().unwrap();
             }
-            if let Some(socket) = self.video_socket.as_ref() {
-                let frame = self.receive_video_frame(&socket);
+            if self.video_socket.is_some() {
+                let frame = self.receive_video_frame();
                 if frame.is_some() {
                     return frame;
                 }
@@ -905,7 +917,7 @@ pub struct Package {
 pub enum Message {
     Data(Package),
     Response(ResponseMsg),
-    Frame(u8, Vec<u8>),
+    Frame(u32, Vec<u8>),
 }
 
 impl TryFrom<Vec<u8>> for Message {

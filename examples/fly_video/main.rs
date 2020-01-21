@@ -9,11 +9,25 @@ use std::time::Duration;
 use std::ops::Deref;
 use tello::{Drone, Flip, Message, Package, PackageData, RCState, ResponseMsg};
 
+extern crate gstreamer as gst;
+use gst::prelude::*;
+extern crate gstreamer_app as gst_app;
+extern crate gstreamer_video as gst_video;
+
+// extern crate glib;
+#[derive(Debug)]
+struct MissingElement(&'static str);
+
 const WINDOW_WIDTH: u32 = 1280;
 const WINDOW_HEIGHT: u32 = 720;
 
+const VIDEO_WIDTH: u32 = 920;
+const VIDEO_HEIGHT: u32 = 720;
+
 fn main() -> Result<(), String> {
     let mut drone = Drone::new("192.168.10.1:8889");
+
+    let (video_pipeline, app_src) = create_video_pipeline().expect("expect to get gStreamer pipeline. Check your gStreamer installation.");
 
     let sdl_context = sdl2::init()?;
     let video_subsystem = sdl_context.video()?;
@@ -58,6 +72,19 @@ fn main() -> Result<(), String> {
     let mut video_on = false;
     let mut bounce_on = false;
     let mut keyboard = ControllerState::default();
+
+    video_pipeline.set_state(gst::State::Playing).unwrap();
+
+    let bus = video_pipeline
+        .get_bus()
+        .expect("Pipeline without bus. Shouldn't happen!");
+
+
+    let main_loop = glib::MainLoop::new(None, false);
+    std::thread::spawn(move || {
+        main_loop.run();
+    });
+
 
     'running: loop {
         canvas.set_draw_color(Color::RGB(80, 64, 255 - 80));
@@ -124,6 +151,8 @@ fn main() -> Result<(), String> {
                     keycode: Some(Keycode::V),
                     ..
                 } => {
+                    let _ = video_pipeline.set_state(gst::State::Paused);
+                    let _ = video_pipeline.set_state(gst::State::Playing);
                     if video_on == false {
                         video_on = true;
                         drone.start_video().unwrap();
@@ -195,14 +224,20 @@ fn main() -> Result<(), String> {
 
         if let Some(msg) = drone.poll() {
             match msg {
-                Message::Data(Package {data: PackageData::FlightData(d), ..}) => {
-                    println!("battery {}", d.battery_percentage);
+                Message::Data(Package {data: PackageData::FlightData(_d), ..}) => {
                 }
-                Message::Data(d) /*if d.cmd != CommandIds::LogHeaderMsg*/ => {
-                    println!("msg {:?}", d.clone());
+                Message::Data(_d) /*if d.cmd != CommandIds::LogHeaderMsg*/ => {
                 }
                 Message::Frame(frame_id, d)=> {
-                    println!("frame {} {:?}", frame_id, &d[..15]);
+                    let mut buffer = gst::buffer::Buffer::from_slice(d);
+                    {
+                        let buffer = buffer.get_mut().unwrap();
+                        buffer.set_pts(gst::ClockTime::from_mseconds(frame_id as u64 * 35u64));
+                        buffer.set_duration(gst::ClockTime::from_mseconds(1_000 / 35));
+                    }
+                    let _ = app_src.push_buffer(buffer);
+                    let _ = video_pipeline.set_state(gst::State::Playing);
+
                 }
                 Message::Response(ResponseMsg::Connected(_)) => {
                     println!("connected");
@@ -211,12 +246,68 @@ fn main() -> Result<(), String> {
             }
         }
 
+        if bus.have_pending() {
+            let msg = bus.pop().unwrap();
+            match msg.view() {
+                gst::MessageView::Eos(..) => break,
+                gst::MessageView::Error(err) => {
+                    video_pipeline.set_state(gst::State::Null).expect("pipeline failed");
+                    eprintln!("ERROR: {:?}, {:?}, {:?}",
+                        msg.get_src()
+                            .map(|s| String::from(s.get_path_string()))
+                            .unwrap_or_else(|| String::from("None")),
+                        err.get_debug(),
+                        err.get_error(),
+                    )
+                },
+                gst::MessageView::ClockLost(_) => {
+                    let _ = video_pipeline.set_state(gst::State::Paused);
+                    let _ = video_pipeline.set_state(gst::State::Playing);
+                }
+                e => {
+                    println!("{:?}", e);
+                },
+            }
+        }
         canvas.present();
         ::std::thread::sleep(Duration::from_millis(10));
     }
 
+    video_pipeline.set_state(gst::State::Null).expect("pipeline failed");
+
+
     Ok(())
 }
+
+fn create_video_pipeline() -> Result<(gst::Pipeline, gst_app::AppSrc), glib::Error> {
+    gst::init()?;
+
+    let pipeline = gst::Pipeline::new(None);
+    let src = gst::ElementFactory::make("appsrc", None).unwrap();
+    let video_convert = gst::ElementFactory::make("videoconvert", None).unwrap();
+    let sink = gst::ElementFactory::make("autovideosink", None).unwrap();
+
+    pipeline.add_many(&[&src, &video_convert, &sink]).unwrap();
+    gst::Element::link_many(&[&src, &video_convert, &sink]).unwrap();
+
+    let appsrc = src
+        .dynamic_cast::<gst_app::AppSrc>()
+        .expect("Source element is expected to be an appsrc!");
+
+    // Specify the format we want to provide as application into the pipeline
+    // by creating a video info with the given format and creating caps from it for the appsrc element.
+    let video_info =
+        gst_video::VideoInfo::new(gst_video::VideoFormat::I420, VIDEO_WIDTH as u32, VIDEO_HEIGHT as u32)
+            .fps(gst::Fraction::new(2, 1))
+            .build()
+            .expect("Failed to create video info");
+
+    appsrc.set_caps(Some(&video_info.to_caps().unwrap()));
+    appsrc.set_property_format(gst::Format::Buffers);
+
+    Ok((pipeline, appsrc))
+}
+
 
 // represent the keyboard state.
 // witch key is currently pressed
