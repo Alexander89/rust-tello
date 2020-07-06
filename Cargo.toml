@@ -18,6 +18,10 @@ path = "src/lib.rs"
 name = "fly"
 path = "examples/fly/main.rs"
 
+[[example]]
+name = "fly_gamepad"
+path = "examples/fly_gamepad/main.rs"
+
 [dependencies]
 byteorder = "1.1"
 chrono = "0.4.0"
@@ -27,3 +31,4 @@ sdl2 = {version = "0.32", features = ["ttf"]}
 # glib = "0.9"
 # gstreamer = "0.15"
 # gstreamer-video = "0.15"
+gilrs = "0.7.2"
