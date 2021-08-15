@@ -138,7 +138,7 @@ use std::sync::atomic::{AtomicU16, Ordering};
 use std::time::SystemTime;
 
 mod crc;
-mod drone_state;
+pub mod drone_state;
 mod rc_state;
 
 pub use drone_state::DroneMeta;
