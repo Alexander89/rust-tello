@@ -1,6 +1,6 @@
-use std::string::String;
 use std::convert::TryInto;
 use std::ops::Deref;
+use std::string::String;
 
 #[derive(Debug, Clone, Copy)]
 pub struct MetaData {
@@ -15,11 +15,11 @@ pub struct MetaData {
     tof: u16,
     h: u16,
     bat: u16,
-    baro:f32,
+    baro: f32,
     time: u16,
-    agx:f32,
-    agy:f32,
-    agz:f32,
+    agx: f32,
+    agy: f32,
+    agz: f32,
 }
 
 impl MetaData {
@@ -50,8 +50,8 @@ macro_rules! extractValue {
         if $d.starts_with(stringify!($e)) {
             let db = $d.get(stringify!($e).len() + 1..).unwrap();
             match db.parse() {
-                Ok(value) => $v.$e = value, 
-                Err(_) => ()
+                Ok(value) => $v.$e = value,
+                Err(_) => (),
             }
             $v
         } else {

@@ -132,15 +132,17 @@ use chrono::prelude::*;
 use crc::{crc16, crc8};
 use drone_state::{FlightData, LightInfo, LogMessage, WifiInfo};
 use std::convert::TryFrom;
-use std::io::{Cursor, Read, Write, Seek, SeekFrom};
+use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 use std::net::{SocketAddr, UdpSocket};
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::time::SystemTime;
 
+pub mod command_mode;
 mod crc;
 pub mod drone_state;
 mod rc_state;
 
+pub use command_mode::CommandMode;
 pub use drone_state::DroneMeta;
 pub use rc_state::RCState;
 
@@ -349,7 +351,8 @@ impl Drone {
     /// drone.take_off();
     /// ```
     pub fn new(ip: &str) -> Drone {
-        let socket = UdpSocket::bind(&SocketAddr::from(([0, 0, 0, 0], 8889))).expect("couldn't bind to command address");
+        let socket = UdpSocket::bind(&SocketAddr::from(([0, 0, 0, 0], 8889)))
+            .expect("couldn't bind to command address");
         socket.set_nonblocking(true).unwrap();
         socket.connect(ip).expect("connect command socket failed");
 
@@ -376,6 +379,10 @@ impl Drone {
         }
     }
 
+    pub fn command_mode(self) -> CommandMode {
+        CommandMode::from(self.socket)
+    }
+
     /// Connect to the drone and inform the drone on with port you are ready to receive the video-stream
     ///
     /// The Video stream do not start automatically. You have to start it with
@@ -388,7 +395,8 @@ impl Drone {
         self.video.port = video_port;
         self.start_video().unwrap();
 
-        let video_socket = UdpSocket::bind(&SocketAddr::from(([0, 0, 0, 0], self.video.port))).expect("couldn't bind to video address");
+        let video_socket = UdpSocket::bind(&SocketAddr::from(([0, 0, 0, 0], self.video.port)))
+            .expect("couldn't bind to video address");
         video_socket.set_nonblocking(true).unwrap();
         self.video_socket = Some(video_socket);
 
@@ -416,41 +424,38 @@ impl Drone {
     }
 
     /// if there are some data in the udp-socket, all of one frame are collected and returned as UDP-Package
-    fn receive_video_frame(&self, socket: &UdpSocket)-> Option<Message> {
+    fn receive_video_frame(&self, socket: &UdpSocket) -> Option<Message> {
         let mut read_buf = [0; 1440];
 
         socket.set_nonblocking(true).unwrap();
         if let Ok(received) = socket.recv(&mut read_buf) {
-
             let active_frame_id = read_buf[0];
             let mut sqn = read_buf[1];
             let mut frame_buffer = read_buf[2..received].to_owned();
 
             // should start with 0. otherwise delete frame package
             if sqn != 0 {
-                return None
+                return None;
             }
 
             socket.set_nonblocking(false).unwrap();
-            'recVideo : loop {
+            'recVideo: loop {
                 if sqn >= 120 {
-                    break 'recVideo Some( Message::Frame(active_frame_id, frame_buffer) )
+                    break 'recVideo Some(Message::Frame(active_frame_id, frame_buffer));
                 }
                 if let Ok(received) = socket.recv(&mut read_buf) {
                     let frame_id = read_buf[0];
                     if frame_id != active_frame_id {
                         // drop frame to stop data mess
-                        break 'recVideo None
+                        break 'recVideo None;
                     }
 
                     sqn = read_buf[1];
                     let mut data = read_buf[2..received].to_owned();
 
-
                     frame_buffer.append(&mut data);
-
                 } else {
-                    break 'recVideo None
+                    break 'recVideo None;
                 }
             }
         } else {
@@ -540,10 +545,7 @@ impl Drone {
 
 impl Drone {
     pub fn take_off(&self) -> Result {
-        self.send(UdpCommand::new(
-            CommandIds::TakeoffCmd,
-            PackageTypes::X68,
-        ))
+        self.send(UdpCommand::new(CommandIds::TakeoffCmd, PackageTypes::X68))
     }
     pub fn throw_and_go(&self) -> Result {
         let mut cmd = UdpCommand::new(CommandIds::ThrowAndGoCmd, PackageTypes::X48);
@@ -583,16 +585,10 @@ impl Drone {
     }
 
     pub fn get_version(&self) -> Result {
-        self.send(UdpCommand::new(
-            CommandIds::VersionMsg,
-            PackageTypes::X48,
-        ))
+        self.send(UdpCommand::new(CommandIds::VersionMsg, PackageTypes::X48))
     }
     pub fn get_alt_limit(&self) -> Result {
-        self.send(UdpCommand::new(
-            CommandIds::AltLimitMsg,
-            PackageTypes::X68,
-        ))
+        self.send(UdpCommand::new(CommandIds::AltLimitMsg, PackageTypes::X68))
     }
     pub fn set_alt_limit(&self, limit: u8) -> Result {
         let mut cmd = UdpCommand::new(CommandIds::AltLimitCmd, PackageTypes::X68);
@@ -601,10 +597,7 @@ impl Drone {
         self.send(cmd)
     }
     pub fn get_att_angle(&self) -> Result {
-        self.send(UdpCommand::new(
-            CommandIds::AttLimitMsg,
-            PackageTypes::X68,
-        ))
+        self.send(UdpCommand::new(CommandIds::AttLimitMsg, PackageTypes::X68))
     }
     pub fn set_att_angle(&self) -> Result {
         let mut cmd = UdpCommand::new(CommandIds::AttLimitCmd, PackageTypes::X68);
@@ -726,7 +719,10 @@ impl Drone {
     pub fn start_video(&mut self) -> Result {
         self.video.enabled = true;
         self.video.last_video_poll = SystemTime::now();
-        self.send(UdpCommand::new_with_zero_sqn(CommandIds::VideoStartCmd, PackageTypes::X60))
+        self.send(UdpCommand::new_with_zero_sqn(
+            CommandIds::VideoStartCmd,
+            PackageTypes::X60,
+        ))
     }
 
     /// Same as start_video(), but a better name to poll the (SPS/PPS) for the video stream.
@@ -748,8 +744,7 @@ impl Drone {
     /// ```
     pub fn set_video_mode(&mut self, mode: VideoMode) -> Result {
         self.video.mode = mode.clone();
-        let mut cmd =
-            UdpCommand::new_with_zero_sqn(CommandIds::VideoStartCmd, PackageTypes::X68);
+        let mut cmd = UdpCommand::new_with_zero_sqn(CommandIds::VideoStartCmd, PackageTypes::X68);
         cmd.write_u8(mode as u8);
         self.send(cmd)
     }
@@ -860,11 +855,12 @@ impl Into<Vec<u8>> for UdpCommand {
     fn into(self) -> Vec<u8> {
         let mut data = {
             let lng = self.inner.len();
-            let data: &[u8]= &self.inner;
+            let data: &[u8] = &self.inner;
 
             let mut cur = Cursor::new(Vec::new());
             cur.write_u8(START_OF_PACKET).expect("");
-            cur.write_u16::<LittleEndian>((lng as u16 + 11) << 3).expect("");
+            cur.write_u16::<LittleEndian>((lng as u16 + 11) << 3)
+                .expect("");
             cur.write_u8(crc8(cur.clone().into_inner())).expect("");
             cur.write_u8(self.pkt_type as u8).expect("");
             cur.write_u16::<LittleEndian>(self.cmd as u16).expect("");
@@ -883,8 +879,7 @@ impl Into<Vec<u8>> for UdpCommand {
             cur.into_inner()
         };
 
-        data
-            .write_u16::<LittleEndian>(crc16(data.clone()))
+        data.write_u16::<LittleEndian>(crc16(data.clone()))
             .expect("");
 
         data

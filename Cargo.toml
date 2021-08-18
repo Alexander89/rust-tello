@@ -22,13 +22,18 @@ path = "examples/fly/main.rs"
 name = "fly_gamepad"
 path = "examples/fly_gamepad/main.rs"
 
+[[example]]
+name = "command_mode"
+path = "examples/command_mode/main.rs"
+
 [dependencies]
 byteorder = "1.1"
 chrono = "0.4.0"
 
 [dev-dependencies]
-sdl2 = {version = "0.32", features = ["ttf"]}
+sdl2 = {version = "0.34.5", features = ["ttf"]}
 # glib = "0.9"
 # gstreamer = "0.15"
 # gstreamer-video = "0.15"
 gilrs = "0.7.2"
+futures = "0.3.13"
