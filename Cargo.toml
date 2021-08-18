@@ -27,8 +27,8 @@ name = "command_mode"
 path = "examples/command_mode/main.rs"
 
 [dependencies]
-byteorder = "1.1"
-chrono = "0.4.0"
+byteorder = "1.4"
+chrono = "0.4.19"
 
 [dev-dependencies]
 sdl2 = {version = "0.34.5", features = ["ttf"]}
@@ -36,4 +36,4 @@ sdl2 = {version = "0.34.5", features = ["ttf"]}
 # gstreamer = "0.15"
 # gstreamer-video = "0.15"
 gilrs = "0.7.2"
-futures = "0.3.13"
+futures = "0.3.16"
