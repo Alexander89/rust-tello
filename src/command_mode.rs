@@ -166,21 +166,33 @@ impl CommandMode {
         let recv_socket = self.socket.clone();
 
         let drone_reply = async move {
-            let mut buf = [0u8; 8];
+            let mut buf = [0u8; 64];
             let res: Result<(), String> = recv_socket
                 .lock()
-                .and_then(|s| Ok(s.recv(&mut buf)))
-                .map_err(|_| "no data received".to_string())
-                .and_then(move |_| -> Result<(), String> {
-                    String::from_utf8(buf.to_vec())
+                .map_err(|_| "failed to lock socket".to_string())
+                .and_then(|s| {
+                    s.recv(&mut buf)
+                        .and_then(|size| {
+                            if size == 0 {
+                                // one more try
+                                s.recv(&mut buf)
+                            } else {
+                                Ok(size)
+                            }
+                        })
+                        .map_err(|_| "failed to receive data".to_string())
+                })
+                .and_then(|size| Ok(buf[..size].to_vec()))
+                .and_then(|data| -> Result<(), String> {
+                    String::from_utf8(data)
                         .map_err(|_| format!("Failed to read data {:?}", buf))
                         .and_then(|res| {
                             if res.starts_with("ok") {
                                 Ok(())
-                            } else if res.starts_with(0 as char) {
-                                Err("did not reply".to_string())
+                            } else if res.starts_with("error") {
+                                Err(res)
                             } else {
-                                Err("Drone replies Error".to_string())
+                                Err("Unknown response".to_string())
                             }
                         })
                 });
@@ -190,31 +202,31 @@ impl CommandMode {
     }
 
     pub async fn enable(&self) -> Result<(), String> {
-        println!("enable");
+        // println!("enable");
         self.send_command(b"command").await
     }
     pub async fn emergency(&self) -> Result<(), String> {
-        println!("emergency");
+        // println!("emergency");
         self.send_command(b"emergency").await
     }
     pub async fn take_off(&self) -> Result<(), String> {
-        println!("take off");
+        // println!("take off");
         self.send_command(b"takeoff").await
     }
     pub async fn land(&self) -> Result<(), String> {
-        println!("land");
+        // println!("land");
         self.send_command(b"land").await
     }
     pub async fn video_on(&self) -> Result<(), String> {
-        println!("video on");
+        // println!("video on");
         self.send_command(b"streamon").await
     }
     pub async fn video_off(&self) -> Result<(), String> {
-        println!("video off");
+        // println!("video off");
         self.send_command(b"streamoff").await
     }
     pub async fn up(&mut self, step: u32) -> Result<(), String> {
-        println!("up");
+        // println!("up");
         let step_norm = step.min(500).max(20);
         let command = format!("up {}", step_norm);
         self.send_command(&command.into_bytes())
@@ -222,7 +234,7 @@ impl CommandMode {
             .and_then(|_| Ok(self.position.up(step_norm)))
     }
     pub async fn down(&mut self, step: u32) -> Result<(), String> {
-        println!("down");
+        // println!("down");
         let step_norm = step.min(500).max(20);
         let command = format!("down {}", step_norm);
         self.send_command(&command.into_bytes())
@@ -230,7 +242,7 @@ impl CommandMode {
             .and_then(|_| Ok(self.position.down(step_norm)))
     }
     pub async fn left(&mut self, step: u32) -> Result<(), String> {
-        println!("left");
+        // println!("left");
         let step_norm = step.min(500).max(20);
         let command = format!("left {}", step_norm);
         self.send_command(&command.into_bytes())
@@ -238,7 +250,7 @@ impl CommandMode {
             .and_then(|_| Ok(self.position.left(step_norm)))
     }
     pub async fn right(&mut self, step: u32) -> Result<(), String> {
-        println!("right");
+        // println!("right");
         let step_norm = step.min(500).max(20);
         let command = format!("right {}", step_norm);
         self.send_command(&command.into_bytes())
@@ -246,7 +258,7 @@ impl CommandMode {
             .and_then(|_| Ok(self.position.right(step_norm)))
     }
     pub async fn forward(&mut self, step: u32) -> Result<(), String> {
-        println!("forward");
+        // println!("forward");
         let step_norm = step.min(500).max(20);
         let command = format!("forward {}", step_norm);
         self.send_command(&command.into_bytes())
@@ -254,7 +266,7 @@ impl CommandMode {
             .and_then(|_| Ok(self.position.forward(step_norm)))
     }
     pub async fn back(&mut self, step: u32) -> Result<(), String> {
-        println!("back");
+        // println!("back");
         let step_norm = step.min(500).max(20);
         self.position.back(step_norm);
         let command = format!("back {}", step_norm);
@@ -263,7 +275,7 @@ impl CommandMode {
             .and_then(|_| Ok(self.position.back(step_norm)))
     }
     pub async fn cw(&mut self, step: u32) -> Result<(), String> {
-        println!("cw");
+        // println!("cw");
         let command = format!("cw {}", step);
         let step_norm = step.min(3600).max(1);
         self.send_command(&command.into_bytes())
@@ -271,7 +283,7 @@ impl CommandMode {
             .and_then(|_| Ok(self.position.cw(step_norm)))
     }
     pub async fn ccw(&mut self, step: u32) -> Result<(), String> {
-        println!("ccw");
+        // println!("ccw");
         let step_norm = step.min(3600).max(1);
         let command = format!("ccw {}", step);
         self.send_command(&command.into_bytes())
@@ -279,7 +291,7 @@ impl CommandMode {
             .and_then(|_| Ok(self.position.ccw(step_norm)))
     }
     pub async fn go_to(&mut self, x: u32, y: u32, z: u32, speed: u8) -> Result<(), String> {
-        println!("speed");
+        // println!("speed");
         let x_norm = x.min(500).max(20);
         let y_norm = y.min(500).max(20);
         let z_norm = z.min(500).max(20);
