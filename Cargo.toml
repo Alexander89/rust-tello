@@ -1,13 +1,13 @@
 [package]
 name = "tello"
 description = "SDK for intel DJI Tello drone using the native api"
-version = "0.3.1"
+version = "0.4.0"
 authors = ["Alex Halemba <alex-halemba@gmx.de>"]
 edition = "2018"
 repository = "https://github.com/Alexander89/rust-tello"
 license-file = "./LICENCE"
 readme = "./README.md"
-keywords = ["Drone", "Tello", "DJI"]
+keywords = ["Drone", "Tello", "Ryze", "DJI", "Ryze Robotics"]
 documentation = "https://docs.rs/tello"
 
 [lib]
@@ -25,6 +25,10 @@ path = "examples/fly_gamepad/main.rs"
 [[example]]
 name = "command_mode"
 path = "examples/command_mode/main.rs"
+
+[[example]]
+name = "command_mode_keyboard"
+path = "examples/command_mode_keyboard/main.rs"
 
 [dependencies]
 byteorder = "1.4"

@@ -14,6 +14,7 @@ pub struct CommandMode {
     socket: Arc<Mutex<UdpSocket>>,
     pub position: Position,
     pub state_receiver: Receiver<CommandModeState>,
+    pub video_receiver: Receiver<Vec<u8>>,
 }
 #[derive(Default, Debug)]
 pub struct CommandModeState {
@@ -68,59 +69,9 @@ impl TryFrom<&[u8; 150]> for CommandModeState {
     }
 }
 
-impl From<UdpSocket> for CommandMode {
-    fn from(socket: UdpSocket) -> CommandMode {
-        let (tx, rx) = mpsc::channel::<CommandModeState>();
-        thread::spawn(move || {
-            let video_socket = UdpSocket::bind(&SocketAddr::from(([0, 0, 0, 0], 11111)))
-                .expect("couldn't bind to command address");
-            video_socket.set_nonblocking(true).unwrap();
-            let mut resBuffer = [0u8; 20000];
-            let mut ptr = 0;
-            let mut buf = [0u8; 1460];
-            loop {
-                match video_socket.recv(&mut buf) {
-                    Ok(size) => {
-                        if ptr == 0 {
-                            for v in 0..size {
-                                resBuffer[ptr] = buf[v];
-                                ptr += 1;
-                            }
-                        } else {
-                            for v in 0..size {
-                                resBuffer[ptr] = buf[v];
-                                ptr += 1;
-                            }
-                        }
-                        println!(
-                            "frame {} {}{}{}{}{}{}{}{}{}",
-                            size,
-                            buf[0],
-                            buf[1],
-                            buf[2],
-                            buf[3],
-                            buf[4],
-                            resBuffer[0],
-                            resBuffer[1],
-                            resBuffer[2],
-                            resBuffer[3]
-                        );
-
-                        if size < 1460 {
-                            println!("size is: {}", ptr);
-                            ptr = 0;
-                            resBuffer = [0u8; 20000];
-                            video_socket
-                                .send_to(&resBuffer[0..ptr], "127.0.0.1:11001")
-                                .unwrap();
-                        }
-                    }
-                    Err(_) => {
-                        sleep(Duration::from_millis(100));
-                    }
-                }
-            }
-        });
+impl CommandMode {
+    fn create_state_receiver() -> Receiver<CommandModeState> {
+        let (tx, state_receiver) = mpsc::channel::<CommandModeState>();
         thread::spawn(move || {
             let state_socket = UdpSocket::bind(&SocketAddr::from(([0, 0, 0, 0], 8890)))
                 .expect("couldn't bind to command address");
@@ -133,18 +84,61 @@ impl From<UdpSocket> for CommandMode {
                         if e.raw_os_error().unwrap_or(0) == 11 {
                             sleep(Duration::from_millis(500));
                         } else {
-                            println!("Hmmm, what do i do here {:?}", e.to_string());
+                            println!("BOOM: {:?}", e.to_string());
                             break 'udpReceiverLoop;
                         }
                     }
                 }
             }
         });
+        state_receiver
+    }
+    fn create_video_receiver(port: u16) -> Receiver<Vec<u8>> {
+        let (video_sender, video_receiver) = mpsc::channel::<Vec<u8>>();
+        thread::spawn(move || {
+            let video_socket = UdpSocket::bind(&SocketAddr::from(([0, 0, 0, 0], port)))
+                .expect("couldn't bind to command address");
+            video_socket.set_nonblocking(true).unwrap();
+            let mut res_buffer = [0u8; 20000];
+            let mut ptr = 0;
+            let mut buf = [0u8; 1460];
+            loop {
+                match video_socket.recv(&mut buf) {
+                    Ok(size) => {
+                        for v in 0..size {
+                            res_buffer[ptr] = buf[v];
+                            ptr += 1;
+                        }
+                        if size < 1460 {
+                            println!("got frame: size {}", ptr);
+                            video_sender.send(res_buffer[0..ptr].to_owned()).unwrap();
+                            ptr = 0;
+                            res_buffer = [0u8; 20000];
+                        }
+                    }
+                    Err(_) => {
+                        sleep(Duration::from_millis(100));
+                    }
+                }
+            }
+        });
+        video_receiver
+    }
+}
+
+impl From<UdpSocket> for CommandMode {
+    fn from(socket: UdpSocket) -> CommandMode {
+        // state receiver
+        let state_receiver = Self::create_state_receiver();
+
+        // video receiver
+        let video_receiver = Self::create_video_receiver(11111);
 
         Self {
             socket: Arc::new(Mutex::new(socket)),
             position: Position::default(),
-            state_receiver: rx,
+            state_receiver,
+            video_receiver,
         }
     }
 }

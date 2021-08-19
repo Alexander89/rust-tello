@@ -25,7 +25,7 @@ To receive the data, you have to poll the drone. Here is an example:
 
 ### Example
 
-```
+```rust
 use tello::{Drone, Message, Package, PackageData, ResponseMsg};
 use std::time::Duration;
 
@@ -50,6 +50,53 @@ fn main() -> Result<(), String> {
 }
 ```
 
+## Command mode
+
+You can switch the drone to the command mode. to get back to the "Free-Flight-Mode" you have to reboot the drone.
+The CommandMode provides following information to you:
+
+-   `state_receiver: Receiver<CommandModeState>`: parsed incoming state packages from the drone
+-   `video_receiver: Receiver<Vec<u8>>`: video frames (h264) from the drone
+-   `position: Position` odometer data for your movements. (turn is not implemented and will give you wrong data)
+
+### Example
+
+```rust
+use futures::executor::block_on;
+use std::{string::String, thread::sleep, time::Duration};
+use tello::Drone;
+
+fn main() -> Result<(), String> {
+    let mut drone = Drone::new("192.168.10.1:8889").command_mode();
+
+    sleep(Duration::from_millis(100));
+    block_on(drone.enable())?;
+
+    match drone.state_receiver.recv_timeout(Duration::from_secs(5)) {
+        Ok(message) => println!(
+            "Battery {}% Height {}dm POS {:?}",
+            message.bat, message.h, drone.position
+        ),
+        _ => println!("No state package received"),
+    }
+
+    block_on(drone.take_off())?;
+    sleep(Duration::from_secs(1));
+
+    for _ in 0..3 {
+        block_on(drone.forward(50))?;
+        sleep(Duration::from_secs(1));
+        block_on(drone.cw(90))?;
+        sleep(Duration::from_secs(1));
+    }
+
+    block_on(drone.land())?;
+    sleep(Duration::from_secs(1));
+
+    Ok(())
+}
+```
+
 ## Remote control
 
 the poll is not only receiving messages from the drone, it will also send some default-settings, replies with acknowledgements, triggers the key frames or send the remote-control state for the live move commands.
@@ -60,7 +107,7 @@ The following example is opening a window with SDL, handles the keyboard inputs 
 
 ### Example
 
-```
+```rust
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
 use tello::{Drone, Message, Package, PackageData, ResponseMsg};
