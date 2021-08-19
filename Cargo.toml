@@ -7,7 +7,7 @@ edition = "2018"
 repository = "https://github.com/Alexander89/rust-tello"
 license-file = "./LICENCE"
 readme = "./README.md"
-keywords = ["Drone", "Tello", "Ryze", "DJI", "Ryze Robotics"]
+keywords = ["Drone", "Tello", "Ryze", "DJI", "RyzeRobotics"]
 documentation = "https://docs.rs/tello"
 
 [lib]
