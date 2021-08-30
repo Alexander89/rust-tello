@@ -11,8 +11,8 @@ fn main() -> Result<(), String> {
     let mut drone = Drone::new("192.168.10.1:8889").command_mode();
 
     let stdin_channel = create_stdin_channel();
-    block_on(drone.enable());
-    block_on(drone.video_on());
+    let _failed_sometimes_but_works = block_on(drone.enable());
+    block_on(drone.video_on())?;
     // block_on(drone.video_off());
     'mainLoop: loop {
         match stdin_channel.try_recv() {
@@ -46,7 +46,7 @@ fn main() -> Result<(), String> {
         match drone.state_receiver.try_recv() {
             Ok(message) => println!(
                 "battery {}%  height {}dm POS {:?}",
-                message.bat, message.h, drone.position
+                message.bat, message.h, drone.odometry
             ),
             _ => (),
         }

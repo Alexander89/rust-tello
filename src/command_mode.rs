@@ -10,9 +10,11 @@ use std::{
     time::Duration,
 };
 
+use crate::odometry::Odometry;
+
 pub struct CommandMode {
     socket: Arc<Mutex<UdpSocket>>,
-    pub position: Position,
+    pub odometry: Odometry,
     pub state_receiver: Receiver<CommandModeState>,
     pub video_receiver: Receiver<Vec<u8>>,
 }
@@ -136,7 +138,7 @@ impl From<UdpSocket> for CommandMode {
 
         Self {
             socket: Arc::new(Mutex::new(socket)),
-            position: Position::default(),
+            odometry: Odometry::default(),
             state_receiver,
             video_receiver,
         }
@@ -231,7 +233,7 @@ impl CommandMode {
         let command = format!("up {}", step_norm);
         self.send_command(&command.into_bytes())
             .await
-            .and_then(|_| Ok(self.position.up(step_norm)))
+            .and_then(|_| Ok(self.odometry.up(step_norm)))
     }
     pub async fn down(&mut self, step: u32) -> Result<(), String> {
         // println!("down");
@@ -239,7 +241,7 @@ impl CommandMode {
         let command = format!("down {}", step_norm);
         self.send_command(&command.into_bytes())
             .await
-            .and_then(|_| Ok(self.position.down(step_norm)))
+            .and_then(|_| Ok(self.odometry.down(step_norm)))
     }
     pub async fn left(&mut self, step: u32) -> Result<(), String> {
         // println!("left");
@@ -247,7 +249,7 @@ impl CommandMode {
         let command = format!("left {}", step_norm);
         self.send_command(&command.into_bytes())
             .await
-            .and_then(|_| Ok(self.position.left(step_norm)))
+            .and_then(|_| Ok(self.odometry.left(step_norm)))
     }
     pub async fn right(&mut self, step: u32) -> Result<(), String> {
         // println!("right");
@@ -255,7 +257,7 @@ impl CommandMode {
         let command = format!("right {}", step_norm);
         self.send_command(&command.into_bytes())
             .await
-            .and_then(|_| Ok(self.position.right(step_norm)))
+            .and_then(|_| Ok(self.odometry.right(step_norm)))
     }
     pub async fn forward(&mut self, step: u32) -> Result<(), String> {
         // println!("forward");
@@ -263,16 +265,16 @@ impl CommandMode {
         let command = format!("forward {}", step_norm);
         self.send_command(&command.into_bytes())
             .await
-            .and_then(|_| Ok(self.position.forward(step_norm)))
+            .and_then(|_| Ok(self.odometry.forward(step_norm)))
     }
     pub async fn back(&mut self, step: u32) -> Result<(), String> {
         // println!("back");
         let step_norm = step.min(500).max(20);
-        self.position.back(step_norm);
+        self.odometry.back(step_norm);
         let command = format!("back {}", step_norm);
         self.send_command(&command.into_bytes())
             .await
-            .and_then(|_| Ok(self.position.back(step_norm)))
+            .and_then(|_| Ok(self.odometry.back(step_norm)))
     }
     pub async fn cw(&mut self, step: u32) -> Result<(), String> {
         // println!("cw");
@@ -280,7 +282,7 @@ impl CommandMode {
         let step_norm = step.min(3600).max(1);
         self.send_command(&command.into_bytes())
             .await
-            .and_then(|_| Ok(self.position.cw(step_norm)))
+            .and_then(|_| Ok(self.odometry.cw(step_norm)))
     }
     pub async fn ccw(&mut self, step: u32) -> Result<(), String> {
         // println!("ccw");
@@ -288,7 +290,7 @@ impl CommandMode {
         let command = format!("ccw {}", step);
         self.send_command(&command.into_bytes())
             .await
-            .and_then(|_| Ok(self.position.ccw(step_norm)))
+            .and_then(|_| Ok(self.odometry.ccw(step_norm)))
     }
     pub async fn go_to(&mut self, x: i32, y: i32, z: i32, speed: u8) -> Result<(), String> {
         // println!("speed");
@@ -328,40 +330,5 @@ impl CommandMode {
         let normalized_speed = speed.min(100).max(10);
         let command = format!("speed {}", normalized_speed);
         self.send_command(&command.into_bytes()).await
-    }
-}
-
-#[derive(Default, Debug)]
-pub struct Position {
-    x: i64,
-    y: i64,
-    z: i64,
-    rot: i64,
-}
-
-impl Position {
-    fn up(&mut self, z: u32) -> () {
-        self.z += z.max(20).min(500) as i64;
-    }
-    fn down(&mut self, z: u32) -> () {
-        self.z -= z.max(20).min(500) as i64;
-    }
-    fn right(&mut self, x: u32) -> () {
-        self.x += x.max(20).min(500) as i64;
-    }
-    fn left(&mut self, x: u32) -> () {
-        self.x -= x.max(20).min(500) as i64;
-    }
-    fn forward(&mut self, y: u32) -> () {
-        self.y += y.max(20).min(500) as i64;
-    }
-    fn back(&mut self, y: u32) -> () {
-        self.y -= y.max(20).min(500) as i64;
-    }
-    fn cw(&mut self, rot: u32) -> () {
-        self.rot += rot.max(1).min(3600) as i64;
-    }
-    fn ccw(&mut self, rot: u32) -> () {
-        self.rot -= rot.max(1).min(3600) as i64;
     }
 }

@@ -57,7 +57,7 @@ The CommandMode provides following information to you:
 
 -   `state_receiver: Receiver<CommandModeState>`: parsed incoming state packages from the drone
 -   `video_receiver: Receiver<Vec<u8>>`: video frames (h264) from the drone
--   `position: Position` odometer data for your movements. (turn is not implemented and will give you wrong data)
+-   `odometry: Odometry` odometer data for your movements.
 
 ### Example
 
@@ -73,7 +73,7 @@ fn main() -> Result<(), String> {
     match drone.state_receiver.recv_timeout(Duration::from_secs(5)) {
         Ok(message) => println!(
             "Battery {}% Height {}dm POS {:?}",
-            message.bat, message.h, drone.position
+            message.bat, message.h, drone.odometry
         ),
         _ => println!("No state package received"),
     }

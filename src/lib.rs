@@ -140,6 +140,7 @@ use std::time::SystemTime;
 pub mod command_mode;
 mod crc;
 pub mod drone_state;
+pub mod odometry;
 mod rc_state;
 
 pub use command_mode::CommandMode;

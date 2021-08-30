@@ -5,7 +5,6 @@ use sdl2::rect::Rect;
 use std::path::Path;
 use std::string::String;
 use std::time::Duration;
-use std::net::{SocketAddr, UdpSocket};
 
 use std::ops::Deref;
 use tello::{Drone, Flip, Message, Package, PackageData, RCState, ResponseMsg};
