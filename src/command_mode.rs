@@ -290,7 +290,7 @@ impl CommandMode {
             .await
             .and_then(|_| Ok(self.position.ccw(step_norm)))
     }
-    pub async fn go_to(&mut self, x: u32, y: u32, z: u32, speed: u8) -> Result<(), String> {
+    pub async fn go_to(&mut self, x: i32, y: i32, z: i32, speed: u8) -> Result<(), String> {
         // println!("speed");
         let x_norm = x.min(500).max(20);
         let y_norm = y.min(500).max(20);
