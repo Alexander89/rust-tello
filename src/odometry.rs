@@ -1,4 +1,4 @@
-#[derive(Default, Debug, PartialEq)]
+#[derive(Default, Debug, PartialEq, Clone)]
 pub struct Odometry {
     pub x: f64,
     pub y: f64,
