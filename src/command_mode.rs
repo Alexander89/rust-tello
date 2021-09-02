@@ -7,7 +7,7 @@ use std::{
         Arc, Mutex,
     },
     thread::{self, sleep},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use crate::odometry::Odometry;
@@ -149,7 +149,6 @@ impl CommandMode {
     pub fn new(ip: &str) -> Self {
         let socket = UdpSocket::bind(&SocketAddr::from(([0, 0, 0, 0], 8889)))
             .expect("couldn't bind to command address");
-        socket.set_nonblocking(true).unwrap();
         socket.connect(ip).expect("connect command socket failed");
         Self::from(socket)
     }
@@ -157,50 +156,55 @@ impl CommandMode {
 
 impl CommandMode {
     async fn send_command(&self, command: &[u8]) -> Result<(), String> {
-        self.socket
-            .lock()
-            .map_err(|_| "Failed to lock the socket".to_string())
-            .and_then(|socket| {
-                socket
-                    .send(&command)
-                    .map_err(|_| "Failed to send command to drone".to_string())
-            })?;
         let recv_socket = self.socket.clone();
+        let timeout = Instant::now();
+        async move {
+            let socket = recv_socket.lock().unwrap();
+            {
+                // clear socket if something is left in there
+                let mut buf = [0u8; 4192];
+                let _ignore = socket.recv(&mut buf);
+            }
+            socket
+                .send(&command)
+                .map_err(|e| format!("Failed to send command to drone: {:?}", e))?;
 
-        let drone_reply = async move {
             let mut buf = [0u8; 64];
-            let res: Result<(), String> = recv_socket
-                .lock()
-                .map_err(|_| "failed to lock socket".to_string())
-                .and_then(|s| {
-                    s.recv(&mut buf)
-                        .and_then(|size| {
-                            if size == 0 {
-                                // one more try
-                                s.recv(&mut buf)
-                            } else {
-                                Ok(size)
+            loop {
+                let res = socket.recv(&mut buf);
+                match res {
+                    Err(e) => {
+                        // 11 = Resource temporarily unavailable
+                        if let Some(11) = e.raw_os_error() {
+                            if timeout.elapsed() > Duration::new(30, 0) {
+                                break Err("timeout".to_string());
                             }
-                        })
-                        .map_err(|_| "failed to receive data".to_string())
-                })
-                .and_then(|size| Ok(buf[..size].to_vec()))
-                .and_then(|data| -> Result<(), String> {
-                    String::from_utf8(data)
-                        .map_err(|_| format!("Failed to read data {:?}", buf))
-                        .and_then(|res| {
-                            if res.starts_with("ok") {
-                                Ok(())
-                            } else if res.starts_with("error") {
-                                Err(res)
-                            } else {
-                                Err("Unknown response".to_string())
-                            }
-                        })
-                });
-            res
-        };
-        drone_reply.await
+                            std::thread::sleep(Duration::from_millis(300));
+                        } else {
+                            break Err(format!("socket error {:?}", e));
+                        }
+                    }
+                    Ok(bytes) => {
+                        break String::from_utf8(buf[..bytes].to_vec())
+                            .map_err(|_| format!("Failed to read data {:?}", buf))
+                            .and_then(|res| {
+                                if res.starts_with("ok") {
+                                    println!(
+                                        "got OK for {:?}!",
+                                        String::from_utf8(command.to_vec()).unwrap()
+                                    );
+                                    Ok(())
+                                } else if res.starts_with("error") {
+                                    Err(res)
+                                } else {
+                                    Err("Unknown response".to_string())
+                                }
+                            })
+                    }
+                }
+            }
+        }
+        .await
     }
 
     pub async fn enable(&self) -> Result<(), String> {
@@ -211,9 +215,11 @@ impl CommandMode {
         // println!("emergency");
         self.send_command(b"emergency").await
     }
-    pub async fn take_off(&self) -> Result<(), String> {
+    pub async fn take_off(&mut self) -> Result<(), String> {
         // println!("take off");
-        self.send_command(b"takeoff").await
+        let r = self.send_command(b"takeoff").await;
+        self.odometry.up(100);
+        r
     }
     pub async fn land(&self) -> Result<(), String> {
         // println!("land");
@@ -294,11 +300,12 @@ impl CommandMode {
     }
     pub async fn go_to(&mut self, x: i32, y: i32, z: i32, speed: u8) -> Result<(), String> {
         // println!("speed");
-        let x_norm = x.min(500).max(20);
-        let y_norm = y.min(500).max(20);
-        let z_norm = z.min(500).max(20);
+        let x_norm = (x == 0).then(|| 0).unwrap_or(x.min(500).max(20));
+        let y_norm = (y == 0).then(|| 0).unwrap_or(y.min(500).max(20));
+        let z_norm = (z == 0).then(|| 0).unwrap_or(z.min(500).max(20));
         let speed_norm = speed.min(100).max(10);
         let command = format!("go {} {} {} {}", x_norm, y_norm, z_norm, speed_norm);
+        println!("{}", command);
         self.send_command(&command.into_bytes()).await
     }
     pub async fn curve(
