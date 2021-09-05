@@ -1,35 +1,28 @@
-use std::{convert::TryFrom, net::SocketAddr, string::FromUtf8Error, time::Duration};
+use std::{
+    convert::TryFrom,
+    net::SocketAddr,
+    string::FromUtf8Error,
+    sync::{
+        mpsc::{self, Receiver},
+        Arc, Mutex,
+    },
+    thread::{self, sleep},
+    time::{Duration, Instant},
+};
 
 #[cfg(not(feature = "tokio_async"))]
 use std::net::UdpSocket;
-
-#[cfg(not(feature = "tokio_async"))]
-use std::time::Instant;
 #[cfg(feature = "tokio_async")]
 use tokio::net::UdpSocket;
-#[cfg(feature = "tokio_async")]
-use tokio::time::{sleep, timeout};
-
-#[cfg(not(feature = "tokio_async"))]
-use std::sync::mpsc;
-#[cfg(feature = "tokio_async")]
-use tokio::sync::{mpsc, watch};
-
-#[cfg(not(feature = "tokio_async"))]
-type StateReceiver<T> = mpsc::Receiver<T>;
-#[cfg(feature = "tokio_async")]
-type StateReceiver<T> = watch::Receiver<Option<T>>;
 
 use crate::odometry::Odometry;
-
-#[derive(Debug)]
 pub struct CommandMode {
-    peer_addr: SocketAddr,
-    state_receiver: Option<StateReceiver<CommandModeState>>,
-    video_receiver: Option<mpsc::Receiver<Vec<u8>>>,
+    socket: Arc<Mutex<UdpSocket>>,
     pub odometry: Odometry,
+    pub state_receiver: Receiver<CommandModeState>,
+    pub video_receiver: Receiver<Vec<u8>>,
 }
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Debug)]
 pub struct CommandModeState {
     pub pitch: i16, // 0
     pub roll: i16,  // 0
@@ -41,7 +34,7 @@ pub struct CommandModeState {
     pub temph: i8,  // 70
     pub tof: i16,   // 10
     pub h: i16,     // 0
-    pub bat: u8,    // 92
+    pub bat: i8,    // 92
     pub baro: f32,  // 548.55
     pub time: f32,  // 0
     pub agx: f32,   // -5.00
@@ -82,11 +75,10 @@ impl TryFrom<&[u8; 150]> for CommandModeState {
     }
 }
 
-#[cfg(not(feature = "tokio_async"))]
 impl CommandMode {
-    fn create_state_receiver() -> mpsc::Receiver<CommandModeState> {
+    fn create_state_receiver() -> Receiver<CommandModeState> {
         let (tx, state_receiver) = mpsc::channel::<CommandModeState>();
-        std::thread::spawn(move || {
+        thread::spawn(move || {
             let state_socket = UdpSocket::bind(&SocketAddr::from(([0, 0, 0, 0], 8890)))
                 .expect("couldn't bind to command address");
             state_socket.set_nonblocking(true).unwrap();
@@ -96,7 +88,7 @@ impl CommandMode {
                     Ok(_) => tx.send(CommandModeState::try_from(&buf).unwrap()).unwrap(),
                     Err(e) => {
                         if e.raw_os_error().unwrap_or(0) == 11 {
-                            std::thread::sleep(Duration::from_millis(500));
+                            sleep(Duration::from_millis(500));
                         } else {
                             println!("BOOM: {:?}", e.to_string());
                             break 'udpReceiverLoop;
@@ -108,11 +100,13 @@ impl CommandMode {
         state_receiver
     }
 
-    fn create_video_receiver(port: u16) -> mpsc::Receiver<Vec<u8>> {
+    fn create_video_receiver(port: u16) -> Receiver<Vec<u8>> {
         let (video_sender, video_receiver) = mpsc::channel::<Vec<u8>>();
-        std::thread::spawn(move || {
-            let video_socket = UdpSocket::bind(&SocketAddr::from(([0, 0, 0, 0], port)))
-                .expect("couldn't bind to command address");
+        thread::spawn(move || {
+            let video_socket = UdpSocket::bind(&SocketAddr::from(([0, 0, 0, 0], port)));
+            #[cfg(feature = "tokio_async")]
+            let video_socket = video_socket.await;
+            let video_socket = video_socket.expect("couldn't bind to command address");
             video_socket.set_nonblocking(true).unwrap();
             let mut res_buffer = [0u8; 20000];
             let mut ptr = 0;
@@ -132,55 +126,7 @@ impl CommandMode {
                         }
                     }
                     Err(_) => {
-                        std::thread::sleep(Duration::from_millis(100));
-                    }
-                }
-            }
-        });
-        video_receiver
-    }
-}
-#[cfg(feature = "tokio_async")]
-impl CommandMode {
-    fn create_state_receiver() -> StateReceiver<CommandModeState> {
-        let (tx, state_receiver) = watch::channel::<Option<CommandModeState>>(None);
-        tokio::spawn(async move {
-            let state_socket = UdpSocket::bind(&SocketAddr::from(([0, 0, 0, 0], 8890)))
-                .await
-                .expect("couldn't bind to command address");
-
-            let mut buf = [0u8; 150];
-            while let Ok((len, addr)) = state_socket.recv_from(&mut buf).await {
-                println!("{:?} bytes received from {:?}", len, addr);
-                if let Ok(data) = CommandModeState::try_from(&buf) {
-                    let _ = tx.send(Some(data));
-                }
-            }
-        });
-        state_receiver
-    }
-
-    fn create_video_receiver(port: u16) -> mpsc::Receiver<Vec<u8>> {
-        let (video_sender, video_receiver) = mpsc::channel::<Vec<u8>>(50);
-        tokio::spawn(async move {
-            let video_socket = UdpSocket::bind(&SocketAddr::from(([0, 0, 0, 0], port)))
-                .await
-                .expect("couldn't bind to command address");
-
-            let mut res_buffer = [0u8; 20000];
-            let mut ptr = 0;
-            let mut buf = [0u8; 1460];
-            loop {
-                while let Ok((size, _)) = video_socket.recv_from(&mut buf).await {
-                    for v in 0..size {
-                        res_buffer[ptr] = buf[v];
-                        ptr += 1;
-                    }
-                    if size < 1460 {
-                        println!("got frame: size {}", ptr);
-                        let _ = video_sender.send(res_buffer[0..ptr].to_owned());
-                        ptr = 0;
-                        res_buffer = [0u8; 20000];
+                        sleep(Duration::from_millis(100));
                     }
                 }
             }
@@ -189,93 +135,39 @@ impl CommandMode {
     }
 }
 
-impl From<SocketAddr> for CommandMode {
-    fn from(peer_addr: SocketAddr) -> CommandMode {
+impl From<UdpSocket> for CommandMode {
+    fn from(socket: UdpSocket) -> CommandMode {
+        // state receiver
+        let state_receiver = Self::create_state_receiver();
+
+        // video receiver
+        let video_receiver = Self::create_video_receiver(11111);
+
         Self {
-            peer_addr,
+            socket: Arc::new(Mutex::new(socket)),
             odometry: Odometry::default(),
-            state_receiver: Some(Self::create_state_receiver()),
-            video_receiver: Some(Self::create_video_receiver(11111)),
+            state_receiver,
+            video_receiver,
         }
     }
 }
 
 impl CommandMode {
-    pub async fn new(ip: &str) -> Result<Self, std::io::Error> {
-        Ok(Self::from(ip.parse::<SocketAddr>().unwrap()))
-    }
-    pub fn state_receiver(&mut self) -> Option<StateReceiver<CommandModeState>> {
-        let mut recv = None;
-        std::mem::swap(&mut recv, &mut self.state_receiver);
-        recv
-    }
-    pub fn video_receiver(&mut self) -> Option<mpsc::Receiver<Vec<u8>>> {
-        let mut recv = None;
-        std::mem::swap(&mut recv, &mut self.video_receiver);
-        recv
+    pub fn new(ip: &str) -> Self {
+        let socket = UdpSocket::bind(&SocketAddr::from(([0, 0, 0, 0], 8889)));
+
+        let socket = socket.expect("couldn't bind to command address");
+        socket.connect(ip).expect("connect command socket failed");
+        Self::from(socket)
     }
 }
 
-#[cfg(feature = "tokio_async")]
 impl CommandMode {
-    async fn send_command(&self, command: Vec<u8>) -> Result<(), String> {
-        let peer = self.peer_addr.clone();
-        let l = tokio::spawn(async move {
-            let socket = UdpSocket::bind("0.0.0.0:8889")
-                .await
-                .map_err(|e| format!("can't create socket: {:?}", e))?;
-
-            socket
-                .send_to(&command, peer)
-                .await
-                .map_err(|e| format!("Failed to send command to drone: {:?}", e))?;
-
-            let mut buf = [0u8; 64];
-            let res = timeout(Duration::new(30, 0), socket.recv(&mut buf)).await;
-
-            match res {
-                Err(_) => Err(format!("timeout")),
-                Ok(Err(e)) => {
-                    // 11 = Resource temporarily unavailable
-                    if let Some(11) = e.raw_os_error() {
-                        sleep(Duration::from_millis(300)).await;
-                        println!("I should restart the thing !?");
-                        Err(format!("retry?"))
-                    } else {
-                        return Err(format!("socket error {:?}", e));
-                    }
-                }
-                Ok(Ok(bytes)) => {
-                    println!("got data {}, {:?}", bytes, buf[..bytes].to_vec());
-                    return String::from_utf8(buf[..bytes].to_vec())
-                        .map_err(|_| format!("Failed to read data {:?}", buf))
-                        .and_then(|res| {
-                            if res.starts_with("ok") {
-                                println!(
-                                    "got OK for {:?}!",
-                                    String::from_utf8(command.to_vec()).unwrap()
-                                );
-                                Ok(())
-                            } else if res.starts_with("error") {
-                                Err(res)
-                            } else {
-                                Err("Unknown response".to_string())
-                            }
-                        });
-                }
-            }
-        });
-        l.await.unwrap()
-    }
-}
-
-#[cfg(not(feature = "tokio_async"))]
-impl CommandMode {
-    async fn send_command(&self, command: Vec<u8>) -> Result<(), String> {
+    async fn send_command(&self, command: &[u8]) -> Result<(), String> {
+        let recv_socket = self.socket.clone();
         let timeout = Instant::now();
         async move {
-            let socket = UdpSocket::bind("0.0.0.0:8889")
-                .map_err(|e| format!("can't create socket: {:?}", e))?;
+            let socket = recv_socket.lock().unwrap();
             {
                 // clear socket if something is left in there
                 let mut buf = [0u8; 4192];
@@ -322,40 +214,38 @@ impl CommandMode {
         }
         .await
     }
-}
 
-impl CommandMode {
     pub async fn enable(&self) -> Result<(), String> {
         // println!("enable");
-        self.send_command("command".into()).await
+        self.send_command(b"command").await
     }
     pub async fn emergency(&self) -> Result<(), String> {
         // println!("emergency");
-        self.send_command("emergency".into()).await
+        self.send_command(b"emergency").await
     }
     pub async fn take_off(&mut self) -> Result<(), String> {
         // println!("take off");
-        let r = self.send_command("takeoff".into()).await;
+        let r = self.send_command(b"takeoff").await;
         self.odometry.up(100);
         r
     }
     pub async fn land(&self) -> Result<(), String> {
         // println!("land");
-        self.send_command("land".into()).await
+        self.send_command(b"land").await
     }
     pub async fn video_on(&self) -> Result<(), String> {
         // println!("video on");
-        self.send_command("streamon".into()).await
+        self.send_command(b"streamon").await
     }
     pub async fn video_off(&self) -> Result<(), String> {
         // println!("video off");
-        self.send_command("streamoff".into()).await
+        self.send_command(b"streamoff").await
     }
     pub async fn up(&mut self, step: u32) -> Result<(), String> {
         // println!("up");
         let step_norm = step.min(500).max(20);
         let command = format!("up {}", step_norm);
-        self.send_command(command.into())
+        self.send_command(&command.into_bytes())
             .await
             .and_then(|_| Ok(self.odometry.up(step_norm)))
     }
@@ -363,7 +253,7 @@ impl CommandMode {
         // println!("down");
         let step_norm = step.min(500).max(20);
         let command = format!("down {}", step_norm);
-        self.send_command(command.into())
+        self.send_command(&command.into_bytes())
             .await
             .and_then(|_| Ok(self.odometry.down(step_norm)))
     }
@@ -371,7 +261,7 @@ impl CommandMode {
         // println!("left");
         let step_norm = step.min(500).max(20);
         let command = format!("left {}", step_norm);
-        self.send_command(command.into())
+        self.send_command(&command.into_bytes())
             .await
             .and_then(|_| Ok(self.odometry.left(step_norm)))
     }
@@ -379,7 +269,7 @@ impl CommandMode {
         // println!("right");
         let step_norm = step.min(500).max(20);
         let command = format!("right {}", step_norm);
-        self.send_command(command.into())
+        self.send_command(&command.into_bytes())
             .await
             .and_then(|_| Ok(self.odometry.right(step_norm)))
     }
@@ -387,7 +277,7 @@ impl CommandMode {
         // println!("forward");
         let step_norm = step.min(500).max(20);
         let command = format!("forward {}", step_norm);
-        self.send_command(command.into())
+        self.send_command(&command.into_bytes())
             .await
             .and_then(|_| Ok(self.odometry.forward(step_norm)))
     }
@@ -396,7 +286,7 @@ impl CommandMode {
         let step_norm = step.min(500).max(20);
         self.odometry.back(step_norm);
         let command = format!("back {}", step_norm);
-        self.send_command(command.into())
+        self.send_command(&command.into_bytes())
             .await
             .and_then(|_| Ok(self.odometry.back(step_norm)))
     }
@@ -404,7 +294,7 @@ impl CommandMode {
         // println!("cw");
         let command = format!("cw {}", step);
         let step_norm = step.min(3600).max(1);
-        self.send_command(command.into())
+        self.send_command(&command.into_bytes())
             .await
             .and_then(|_| Ok(self.odometry.cw(step_norm)))
     }
@@ -412,7 +302,7 @@ impl CommandMode {
         // println!("ccw");
         let step_norm = step.min(3600).max(1);
         let command = format!("ccw {}", step);
-        self.send_command(command.into())
+        self.send_command(&command.into_bytes())
             .await
             .and_then(|_| Ok(self.odometry.ccw(step_norm)))
     }
@@ -424,7 +314,7 @@ impl CommandMode {
         let speed_norm = speed.min(100).max(10);
         let command = format!("go {} {} {} {}", x_norm, y_norm, z_norm, speed_norm);
         println!("{}", command);
-        self.send_command(command.into()).await
+        self.send_command(&command.into_bytes()).await
     }
     pub async fn curve(
         &mut self,
@@ -448,12 +338,12 @@ impl CommandMode {
             "curve {} {} {} {} {} {} {}",
             x1_norm, y1_norm, z1_norm, x2_norm, y2_norm, z2_norm, speed_norm
         );
-        self.send_command(command.into()).await
+        self.send_command(&command.into_bytes()).await
     }
     pub async fn speed(&self, speed: u8) -> Result<(), String> {
         println!("speed");
         let normalized_speed = speed.min(100).max(10);
         let command = format!("speed {}", normalized_speed);
-        self.send_command(command.into()).await
+        self.send_command(&command.into_bytes()).await
     }
 }

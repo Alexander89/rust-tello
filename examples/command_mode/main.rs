@@ -5,9 +5,10 @@ use tello::Drone;
 fn main() -> Result<(), String> {
     block_on(async {
         let mut drone = Drone::new("192.168.10.1:8889").command_mode();
-        let _failed_sometimes_but_works = drone.enable().await;
+        let state = drone.state_receiver().unwrap();
+        drone.enable().await?;
 
-        match drone.state_receiver.recv_timeout(Duration::from_secs(5)) {
+        match state.recv_timeout(Duration::from_secs(5)) {
             Ok(message) => println!(
                 "Battery {}% Height {}dm POS {:?}",
                 message.bat, message.h, drone.odometry
@@ -27,6 +28,6 @@ fn main() -> Result<(), String> {
 
         println!("land {:?}", drone.land().await);
         sleep(Duration::from_secs(3));
-    });
-    Ok(())
+        Ok(())
+    })
 }

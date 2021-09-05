@@ -165,6 +165,8 @@ struct VideoSettings {
 /// Main connection and controller for the drone
 #[derive(Debug)]
 pub struct Drone {
+    peer_ip: String,
+
     socket: UdpSocket,
     video_socket: Option<UdpSocket>,
     video: VideoSettings,
@@ -352,6 +354,7 @@ impl Drone {
     /// drone.take_off();
     /// ```
     pub fn new(ip: &str) -> Drone {
+        let peer_ip = ip.to_string();
         let socket = UdpSocket::bind(&SocketAddr::from(([0, 0, 0, 0], 8889)))
             .expect("couldn't bind to command address");
         socket.set_nonblocking(true).unwrap();
@@ -370,6 +373,7 @@ impl Drone {
         let drone_meta = DroneMeta::default();
 
         Drone {
+            peer_ip,
             socket,
             video_socket: None,
             video,
@@ -378,10 +382,6 @@ impl Drone {
             rc_state,
             drone_meta,
         }
-    }
-
-    pub fn command_mode(self) -> CommandMode {
-        CommandMode::from(self.socket)
     }
 
     /// Connect to the drone and inform the drone on with port you are ready to receive the video-stream
@@ -544,6 +544,18 @@ impl Drone {
     }
 }
 
+#[cfg(not(feature = "tokio_async"))]
+impl Drone {
+    pub fn command_mode(self) -> CommandMode {
+        CommandMode::from(self.peer_ip.parse::<SocketAddr>().unwrap())
+    }
+}
+#[cfg(feature = "tokio_async")]
+impl Drone {
+    pub fn command_mode(self) -> CommandMode {
+        CommandMode::from(self.peer_ip.parse::<SocketAddr>().unwrap())
+    }
+}
 impl Drone {
     pub fn take_off(&self) -> Result {
         self.send(UdpCommand::new(CommandIds::TakeoffCmd, PackageTypes::X68))

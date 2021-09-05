@@ -8,49 +8,52 @@ use std::{io, thread};
 use tello::Drone;
 
 fn main() -> Result<(), String> {
-    let mut drone = Drone::new("192.168.10.1:8889").command_mode();
+    block_on(async {
+        let mut drone = Drone::new("192.168.10.1:8889").command_mode();
+        let state = drone.state_receiver().unwrap();
 
-    let stdin_channel = create_stdin_channel();
-    let _failed_sometimes_but_works = block_on(drone.enable());
-    'mainLoop: loop {
-        match stdin_channel.try_recv() {
-            Ok(input) => {
-                let commands: Vec<&str> = input.split(' ').collect();
-                let send = match commands[0] {
-                    "exit" => break 'mainLoop,
-                    "streamon" => block_on(drone.video_on()),
-                    "streamoff" => block_on(drone.video_off()),
-                    "enable" => block_on(drone.enable()),
-                    "start" => block_on(drone.take_off()),
-                    "land" => block_on(drone.land()),
-                    "down" => block_on(drone.down(commands[1].parse().unwrap_or(0))),
-                    "up" => block_on(drone.up(commands[1].parse().unwrap_or(0))),
-                    "forward" => block_on(drone.forward(commands[1].parse().unwrap_or(0))),
-                    "back" => block_on(drone.back(commands[1].parse().unwrap_or(0))),
-                    "left" => block_on(drone.left(commands[1].parse().unwrap_or(0))),
-                    "right" => block_on(drone.right(commands[1].parse().unwrap_or(0))),
-                    "cw" => block_on(drone.cw(commands[1].parse().unwrap_or(0))),
-                    "ccw" => block_on(drone.ccw(commands[1].parse().unwrap_or(0))),
-                    //"home" => drone.go_home(0, 0, 0, 20),
-                    _ => Ok(()),
-                };
-                if send.is_err() {
-                    println!("{}", send.err().unwrap())
+        let stdin_channel = create_stdin_channel();
+        let _failed_sometimes_but_works = drone.enable().await;
+        'mainLoop: loop {
+            match stdin_channel.try_recv() {
+                Ok(input) => {
+                    let commands: Vec<&str> = input.split(' ').collect();
+                    let send = match commands[0] {
+                        "exit" => break 'mainLoop,
+                        "streamon" => drone.video_on().await,
+                        "streamoff" => drone.video_off().await,
+                        "enable" => drone.enable().await,
+                        "start" => drone.take_off().await,
+                        "land" => drone.land().await,
+                        "down" => drone.down(commands[1].parse().unwrap_or(0)).await,
+                        "up" => drone.up(commands[1].parse().unwrap_or(0)).await,
+                        "forward" => drone.forward(commands[1].parse().unwrap_or(0)).await,
+                        "back" => drone.back(commands[1].parse().unwrap_or(0)).await,
+                        "left" => drone.left(commands[1].parse().unwrap_or(0)).await,
+                        "right" => drone.right(commands[1].parse().unwrap_or(0)).await,
+                        "cw" => drone.cw(commands[1].parse().unwrap_or(0)).await,
+                        "ccw" => drone.ccw(commands[1].parse().unwrap_or(0)).await,
+                        //"home" => drone.go_home(0, 0, 0, 20),
+                        _ => Ok(()),
+                    };
+                    if send.is_err() {
+                        println!("{}", send.err().unwrap())
+                    }
                 }
+                Err(TryRecvError::Disconnected) => panic!("Channel disconnected"),
+                _ => (),
             }
-            Err(TryRecvError::Disconnected) => panic!("Channel disconnected"),
-            _ => (),
+            match state.try_recv() {
+                Ok(message) => println!(
+                    "battery {}%  height {}dm POS {:?}",
+                    message.bat, message.h, drone.odometry
+                ),
+                _ => (),
+            }
+            sleep(Duration::from_millis(100));
         }
-        match drone.state_receiver.try_recv() {
-            Ok(message) => println!(
-                "battery {}%  height {}dm POS {:?}",
-                message.bat, message.h, drone.odometry
-            ),
-            _ => (),
-        }
-        sleep(Duration::from_millis(100));
-    }
-    Ok(())
+        Ok(())
+    })
 }
 
 fn create_stdin_channel() -> Receiver<String> {
