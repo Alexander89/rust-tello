@@ -55,8 +55,8 @@ fn main() -> Result<(), String> {
 You can switch the drone to the command mode. to get back to the "Free-Flight-Mode" you have to reboot the drone.
 The CommandMode provides following information to you:
 
--   `state_receiver: Receiver<CommandModeState>`: parsed incoming state packages from the drone
--   `video_receiver: Receiver<Vec<u8>>`: video frames (h264) from the drone
+-   `state_receiver(): Option<Receiver<CommandModeState>>`: parsed incoming state packages from the drone. You will take the ownership, you could do this only once.
+-   `video_receiver(): Option<Receiver<Vec<u8>>>`: Video frames (h264) from the drone. You will take the ownership, you could do this only once.
 -   `odometry: Odometry` odometer data for your movements.
 
 ### Example

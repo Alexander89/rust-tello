@@ -22,6 +22,13 @@ type StateReceiver<T> = watch::Receiver<Option<T>>;
 
 use crate::odometry::Odometry;
 
+/// Command mode for your tello drone. to leave the command mode, you have to reboot the drone.
+///
+/// The CommandMode provides following information to you:
+///
+/// -   `state_receiver(): Option<Receiver<CommandModeState>>`: parsed incoming state packages from the drone. You will take the ownership, you could do this only once.
+/// -   `video_receiver(): Option<Receiver<Vec<u8>>>`: Video frames (h264) from the drone. You will take the ownership, you could do this only once.
+/// -   `odometry: Odometry` odometer data for your movements.
 #[derive(Debug)]
 pub struct CommandMode {
     peer_addr: SocketAddr,
@@ -190,6 +197,10 @@ impl CommandMode {
 }
 
 impl From<SocketAddr> for CommandMode {
+    /// Constructs a new CommandMode from a SocketAddr.
+    ///
+    /// The state and the video frames receivers are spawned and provide those information
+    /// if the drone already sends them. Otherwise you have to `enable()` the drone fist.
     fn from(peer_addr: SocketAddr) -> CommandMode {
         Self {
             peer_addr,
@@ -201,14 +212,26 @@ impl From<SocketAddr> for CommandMode {
 }
 
 impl CommandMode {
+    /// Constructs a new CommandMode from a ip address `<ip>:<port>`.
+    ///
+    /// The state and the video frames receivers are spawned and provide those information
+    /// if the drone already sends them.  Otherwise you have to `enable()` the drone fist.
     pub async fn new(ip: &str) -> Result<Self, std::io::Error> {
         Ok(Self::from(ip.parse::<SocketAddr>().unwrap()))
     }
+    /// Take over the ownership of the state receiver. This method returns once the receiver and
+    /// returns `None` afterwards
+    ///
+    /// If you using `tokio_async` you will always get the last known value. otherwise, you will
+    /// get a channel of the incoming data.
     pub fn state_receiver(&mut self) -> Option<StateReceiver<CommandModeState>> {
         let mut recv = None;
         std::mem::swap(&mut recv, &mut self.state_receiver);
         recv
     }
+
+    /// Take over the ownership of the video receiver. This method returns once the receiver and
+    /// returns `None` afterwards
     pub fn video_receiver(&mut self) -> Option<mpsc::Receiver<Vec<u8>>> {
         let mut recv = None;
         std::mem::swap(&mut recv, &mut self.video_receiver);
@@ -328,74 +351,77 @@ impl CommandMode {
 }
 
 impl CommandMode {
+    /// enables the drone. This command should be the first one you send.
+    ///
+    /// Note: There is no disable(). you have to power-cycle the drone to get it
+    /// back to the normal mode.
     pub async fn enable(&self) -> Result<(), String> {
-        // println!("enable");
         self.send_command("command".into()).await
     }
+    /// Emergency will stop the motors immediately without landing
     pub async fn emergency(&self) -> Result<(), String> {
-        // println!("emergency");
         self.send_command("emergency".into()).await
     }
+    /// starts the drone to 1 meter above the ground
     pub async fn take_off(&mut self) -> Result<(), String> {
-        // println!("take off");
         let r = self.send_command("takeoff".into()).await;
         self.odometry.up(100);
         r
     }
+    /// Land the drone
     pub async fn land(&self) -> Result<(), String> {
-        // println!("land");
         self.send_command("land".into()).await
     }
+    /// Enable the drone to send video frames to the 11111 port of the command sender IP
     pub async fn video_on(&self) -> Result<(), String> {
-        // println!("video on");
         self.send_command("streamon".into()).await
     }
+    /// Disable the video stream
     pub async fn video_off(&self) -> Result<(), String> {
-        // println!("video off");
         self.send_command("streamoff".into()).await
     }
+    /// move upwards for 20-500 cm
     pub async fn up(&mut self, step: u32) -> Result<(), String> {
-        // println!("up");
         let step_norm = step.min(500).max(20);
         let command = format!("up {}", step_norm);
         self.send_command(command.into())
             .await
             .and_then(|_| Ok(self.odometry.up(step_norm)))
     }
+    /// move downwards for 20-500 cm (if possible)
     pub async fn down(&mut self, step: u32) -> Result<(), String> {
-        // println!("down");
         let step_norm = step.min(500).max(20);
         let command = format!("down {}", step_norm);
         self.send_command(command.into())
             .await
             .and_then(|_| Ok(self.odometry.down(step_norm)))
     }
+    /// move to the left for 20-500 cm
     pub async fn left(&mut self, step: u32) -> Result<(), String> {
-        // println!("left");
         let step_norm = step.min(500).max(20);
         let command = format!("left {}", step_norm);
         self.send_command(command.into())
             .await
             .and_then(|_| Ok(self.odometry.left(step_norm)))
     }
+    /// move to the right for 20-500 cm
     pub async fn right(&mut self, step: u32) -> Result<(), String> {
-        // println!("right");
         let step_norm = step.min(500).max(20);
         let command = format!("right {}", step_norm);
         self.send_command(command.into())
             .await
             .and_then(|_| Ok(self.odometry.right(step_norm)))
     }
+    /// move forwards for 20-200 cm
     pub async fn forward(&mut self, step: u32) -> Result<(), String> {
-        // println!("forward");
         let step_norm = step.min(500).max(20);
         let command = format!("forward {}", step_norm);
         self.send_command(command.into())
             .await
             .and_then(|_| Ok(self.odometry.forward(step_norm)))
     }
+    /// move backwards for 20 - 500 cm
     pub async fn back(&mut self, step: u32) -> Result<(), String> {
-        // println!("back");
         let step_norm = step.min(500).max(20);
         self.odometry.back(step_norm);
         let command = format!("back {}", step_norm);
@@ -403,24 +429,28 @@ impl CommandMode {
             .await
             .and_then(|_| Ok(self.odometry.back(step_norm)))
     }
+    /// turn clockwise for 0 - 3600 degrees (10 times 360)
     pub async fn cw(&mut self, step: u32) -> Result<(), String> {
-        // println!("cw");
         let command = format!("cw {}", step);
         let step_norm = step.min(3600).max(1);
         self.send_command(command.into())
             .await
             .and_then(|_| Ok(self.odometry.cw(step_norm)))
     }
+    /// turn counter clockwise for 0 - 3600 degrees (10 times 360)
     pub async fn ccw(&mut self, step: u32) -> Result<(), String> {
-        // println!("ccw");
         let step_norm = step.min(3600).max(1);
         let command = format!("ccw {}", step);
         self.send_command(command.into())
             .await
             .and_then(|_| Ok(self.odometry.ccw(step_norm)))
     }
+
+    /// Go to a given position in the 3D space.
+    ///
+    /// - `x`, `y`, `z` 0 or (-)20 - (-)500 cm
+    /// - `speed` speed in centimeter per second
     pub async fn go_to(&mut self, x: i32, y: i32, z: i32, speed: u8) -> Result<(), String> {
-        // println!("speed");
         let x_norm = (x == 0).then(|| 0).unwrap_or(x.min(500).max(20));
         let y_norm = (y == 0).then(|| 0).unwrap_or(y.min(500).max(20));
         let z_norm = (z == 0).then(|| 0).unwrap_or(z.min(500).max(20));
@@ -429,6 +459,11 @@ impl CommandMode {
         println!("{}", command);
         self.send_command(command.into()).await
     }
+
+    /// Moves in a curve parsing the first point to the second point in the shortest path.
+    ///
+    /// The radius could not be to large and the distance cold not exceed the 500 cm
+    /// the minimal distance to go is 0 or 20cm on `x`,`y`,`z`
     pub async fn curve(
         &mut self,
         x1: u32,
@@ -439,13 +474,12 @@ impl CommandMode {
         z2: u32,
         speed: u8,
     ) -> Result<(), String> {
-        println!("curve");
-        let x1_norm = x1.min(500).max(20);
-        let y1_norm = y1.min(500).max(20);
-        let z1_norm = z1.min(500).max(20);
-        let x2_norm = x2.min(500).max(20);
-        let y2_norm = y2.min(500).max(20);
-        let z2_norm = z2.min(500).max(20);
+        let x1_norm = (x1 == 0).then(|| 0).unwrap_or(x1.min(500).max(20));
+        let y1_norm = (y1 == 0).then(|| 0).unwrap_or(y1.min(500).max(20));
+        let z1_norm = (z1 == 0).then(|| 0).unwrap_or(z1.min(500).max(20));
+        let x2_norm = (x2 == 0).then(|| 0).unwrap_or(x2.min(500).max(20));
+        let y2_norm = (y2 == 0).then(|| 0).unwrap_or(y2.min(500).max(20));
+        let z2_norm = (z2 == 0).then(|| 0).unwrap_or(z2.min(500).max(20));
         let speed_norm = speed.min(100).max(10);
         let command = format!(
             "curve {} {} {} {} {} {} {}",
@@ -453,6 +487,8 @@ impl CommandMode {
         );
         self.send_command(command.into()).await
     }
+
+    /// set the speed for the forward, backward, right, left, up, down motion
     pub async fn speed(&self, speed: u8) -> Result<(), String> {
         println!("speed");
         let normalized_speed = speed.min(100).max(10);

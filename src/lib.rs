@@ -544,18 +544,18 @@ impl Drone {
     }
 }
 
-#[cfg(not(feature = "tokio_async"))]
 impl Drone {
+    /// You can switch the drone to the command mode.
+    /// To get back to the "Free-Flight-Mode" you have to reboot the drone.
+    ///
+    /// In the CommandMode you can move the drone by cm in the 3D space
+    /// If you are using tokio as executer, use the `tokio_async` feature
+    /// to prevent the executer from being blocked.
     pub fn command_mode(self) -> CommandMode {
         CommandMode::from(self.peer_ip.parse::<SocketAddr>().unwrap())
     }
 }
-#[cfg(feature = "tokio_async")]
-impl Drone {
-    pub fn command_mode(self) -> CommandMode {
-        CommandMode::from(self.peer_ip.parse::<SocketAddr>().unwrap())
-    }
-}
+
 impl Drone {
     pub fn take_off(&self) -> Result {
         self.send(UdpCommand::new(CommandIds::TakeoffCmd, PackageTypes::X68))
