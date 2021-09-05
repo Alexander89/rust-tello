@@ -276,13 +276,16 @@ impl CommandMode {
         async move {
             let socket = UdpSocket::bind("0.0.0.0:8889")
                 .map_err(|e| format!("can't create socket: {:?}", e))?;
+            socket
+                .set_nonblocking(true)
+                .map_err(|e| format!("set to non-Blocking failed: {:?}", e))?;
             {
                 // clear socket if something is left in there
                 let mut buf = [0u8; 4192];
                 let _ignore = socket.recv(&mut buf);
             }
             socket
-                .send(&command)
+                .send_to(&command, self.peer_addr)
                 .map_err(|e| format!("Failed to send command to drone: {:?}", e))?;
 
             let mut buf = [0u8; 64];
