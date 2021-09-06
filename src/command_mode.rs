@@ -100,7 +100,11 @@ impl CommandMode {
             'udpReceiverLoop: loop {
                 let mut buf = [0u8; 150];
                 match state_socket.recv(&mut buf) {
-                    Ok(_) => tx.send(CommandModeState::try_from(&buf).unwrap()).unwrap(),
+                    Ok(_) => {
+                        if let Ok(state) = CommandModeState::try_from(&buf) {
+                            tx.send(state).unwrap()
+                        }
+                    }
                     Err(e) => {
                         if e.raw_os_error().unwrap_or(0) == 11 {
                             std::thread::sleep(Duration::from_millis(500));

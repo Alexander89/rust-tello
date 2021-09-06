@@ -1,7 +1,7 @@
 [package]
 name = "tello"
 description = "SDK for intel DJI Tello drone using the native api"
-version = "0.6.0"
+version = "0.6.1"
 authors = ["Alex Halemba <alex-halemba@gmx.de>"]
 edition = "2018"
 repository = "https://github.com/Alexander89/rust-tello"
@@ -30,6 +30,11 @@ path = "examples/command_mode/main.rs"
 [[example]]
 name = "command_mode_tokio"
 path = "examples/command_mode_tokio/main.rs"
+required-features = ["tokio_async"]
+
+[[example]]
+name = "command_mode_state"
+path = "examples/command_mode_state/main.rs"
 required-features = ["tokio_async"]
 
 [[example]]
