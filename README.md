@@ -72,6 +72,7 @@ fn main() -> Result<(), String> {
         let state = drone.state_receiver().unwrap();
         drone.enable().await?;
 
+        // if you use "tokio_async" this will be a `tokio::sync::watch::Receiver`
         match state.recv_timeout(Duration::from_secs(5)) {
             Ok(message) => println!(
                 "Battery {}% Height {}dm POS {:?}",
@@ -81,17 +82,13 @@ fn main() -> Result<(), String> {
         }
 
         println!("take_off {:?}", drone.take_off().await);
-        sleep(Duration::from_secs(7));
 
         for _ in 0..6 {
             println!("forward {:?}", drone.forward(30).await);
-            sleep(Duration::from_secs(5));
             println!("cw {:?}", drone.cw(60).await);
-            sleep(Duration::from_secs(4));
         }
 
         println!("land {:?}", drone.land().await);
-        sleep(Duration::from_secs(3));
         Ok(())
     })
 }

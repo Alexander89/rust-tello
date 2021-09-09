@@ -136,7 +136,7 @@ impl CommandMode {
                             ptr += 1;
                         }
                         if size < 1460 {
-                            println!("got frame: size {}", ptr);
+                            //println!("got frame: size {}", ptr);
                             video_sender.send(res_buffer[0..ptr].to_owned()).unwrap();
                             ptr = 0;
                             res_buffer = [0u8; 20000];
@@ -161,8 +161,8 @@ impl CommandMode {
                 .expect("couldn't bind to command address");
 
             let mut buf = [0u8; 150];
-            while let Ok((len, addr)) = state_socket.recv_from(&mut buf).await {
-                println!("{:?} bytes received from {:?}", len, addr);
+            while let Ok(_) = state_socket.recv_from(&mut buf).await {
+                // println!("{:?} bytes received from {:?}", len, addr);
                 if let Ok(data) = CommandModeState::try_from(&buf) {
                     let _ = tx.send(Some(data));
                 }
@@ -188,7 +188,7 @@ impl CommandMode {
                         ptr += 1;
                     }
                     if size < 1460 {
-                        println!("got frame: size {}", ptr);
+                        // println!("got frame: size {}", ptr);
                         let _ = video_sender.send(res_buffer[0..ptr].to_owned());
                         ptr = 0;
                         res_buffer = [0u8; 20000];
@@ -266,22 +266,22 @@ impl CommandMode {
                     // 11 = Resource temporarily unavailable
                     if let Some(11) = e.raw_os_error() {
                         sleep(Duration::from_millis(300)).await;
-                        println!("I should restart the thing !?");
+                        // println!("I should restart the thing !?");
                         Err(format!("retry?"))
                     } else {
                         return Err(format!("socket error {:?}", e));
                     }
                 }
                 Ok(Ok(bytes)) => {
-                    println!("got data {}, {:?}", bytes, buf[..bytes].to_vec());
+                    // println!("got data {}, {:?}", bytes, buf[..bytes].to_vec());
                     return String::from_utf8(buf[..bytes].to_vec())
                         .map_err(|_| format!("Failed to read data {:?}", buf))
                         .and_then(|res| {
                             if res.starts_with("ok") {
-                                println!(
-                                    "got OK for {:?}!",
-                                    String::from_utf8(command.to_vec()).unwrap()
-                                );
+                                // println!(
+                                //     "got OK for {:?}!",
+                                //     String::from_utf8(command.to_vec()).unwrap()
+                                // );
                                 Ok(())
                             } else if res.starts_with("error") {
                                 Err(res)
@@ -335,17 +335,17 @@ impl CommandMode {
                             .map_err(|_| format!("Failed to read data {:?}", buf))
                             .and_then(|res| {
                                 if res.starts_with("ok") {
-                                    println!(
-                                        "got OK for {:?}!",
-                                        String::from_utf8(command.to_vec()).unwrap()
-                                    );
+                                    // println!(
+                                    //     "got OK for {:?}!",
+                                    //     String::from_utf8(command.to_vec()).unwrap()
+                                    // );
                                     Ok(())
                                 } else if res.starts_with("error") {
                                     Err(res)
                                 } else {
                                     Err("Unknown response".to_string())
                                 }
-                            })
+                            });
                     }
                 }
             }
@@ -470,7 +470,7 @@ impl CommandMode {
 
         let speed_norm = speed.min(100).max(10);
         let command = format!("go {} {} {} {}", x_norm, y_norm, z_norm, speed_norm);
-        println!("{}", command);
+        // println!("{}", command);
         self.send_command(command.into()).await.and_then(|_| {
             if x_dir {
                 self.odometry.forward(x_norm.abs() as u32);
@@ -551,7 +551,7 @@ impl CommandMode {
 
     /// set the speed for the forward, backward, right, left, up, down motion
     pub async fn speed(&self, speed: u8) -> Result<(), String> {
-        println!("speed");
+        // println!("speed");
         let normalized_speed = speed.min(100).max(10);
         let command = format!("speed {}", normalized_speed);
         self.send_command(command.into()).await

@@ -1,38 +1,27 @@
-use std::time::Duration;
+use futures::StreamExt;
 use tello::Drone;
-use tokio::{select, time::sleep};
+use tokio_stream::wrappers::WatchStream;
 
 #[tokio::main]
 async fn main() -> Result<(), String> {
     let mut drone = Drone::new("192.168.10.1:8889").command_mode();
-    // let mut drone = Drone::new("127.0.0.1:8880").command_mode();
     drone.enable().await?;
+    let state = WatchStream::new(drone.state_receiver().unwrap());
 
-    let mut state = drone.state_receiver().unwrap();
+    let path = async {
+        println!("take off {:?}", drone.take_off().await);
+        for _ in 0..6 {
+            println!("forward {:?}", drone.forward(30).await);
+            println!("cw {:?}", drone.cw(60).await);
+        }
+        println!("land {:?}", drone.land().await);
+    };
 
-    loop {
-        let path = async {
-            for _ in 0..6 {
-                println!("forward {:?}", drone.forward(30).await);
-                sleep(Duration::from_secs(5)).await;
-                println!("cw {:?}", drone.cw(60).await);
-                sleep(Duration::from_secs(4)).await;
-            }
-            println!("land {:?}", drone.land().await);
-        };
-
-        select! {
-            _ = state.changed() => {
-                if let Some(s) = state.borrow_and_update().clone() {
-                    println!( "Battery {}% Height {}dm POS {:?}", s.bat, s.h, drone.odometry );
-                }
-            },
-            _ = path => {
-                println!("done");
-                break;
-            }
+    let mut s = Box::pin(state.take_until(path));
+    while let Some(s) = s.next().await {
+        if let Some(state) = s {
+            println!("Battery {}% Height {}", state.bat, state.h);
         }
     }
-    sleep(Duration::from_secs(3)).await;
     Ok(())
 }
