@@ -369,6 +369,7 @@ impl CommandMode {
     /// starts the drone to 1 meter above the ground
     pub async fn take_off(&mut self) -> Result<(), String> {
         let r = self.send_command("takeoff".into()).await;
+        self.odometry.reset();
         self.odometry.up(100);
         r
     }
@@ -427,7 +428,6 @@ impl CommandMode {
     /// move backwards for 20 - 500 cm
     pub async fn back(&mut self, step: u32) -> Result<(), String> {
         let step_norm = step.min(500).max(20);
-        self.odometry.back(step_norm);
         let command = format!("back {}", step_norm);
         self.send_command(command.into())
             .await
@@ -455,13 +455,40 @@ impl CommandMode {
     /// - `x`, `y`, `z` 0 or (-)20 - (-)500 cm
     /// - `speed` speed in centimeter per second
     pub async fn go_to(&mut self, x: i32, y: i32, z: i32, speed: u8) -> Result<(), String> {
-        let x_norm = (x == 0).then(|| 0).unwrap_or(x.min(500).max(20));
-        let y_norm = (y == 0).then(|| 0).unwrap_or(y.min(500).max(20));
-        let z_norm = (z == 0).then(|| 0).unwrap_or(z.min(500).max(20));
+        let x_dir = x > 0;
+        let y_dir = y > 0;
+        let z_dir = z > 0;
+
+        let mut x_norm = (x == 0).then(|| 0).unwrap_or(x.abs().min(500).max(20));
+        x_norm = x_dir.then(|| x_norm).unwrap_or(x_norm * -1);
+
+        let mut y_norm = (y == 0).then(|| 0).unwrap_or(y.abs().min(500).max(20));
+        y_norm = y_dir.then(|| y_norm).unwrap_or(y_norm * -1);
+
+        let mut z_norm = (z == 0).then(|| 0).unwrap_or(z.abs().min(500).max(20));
+        z_norm = z_dir.then(|| z_norm).unwrap_or(z_norm * -1);
+
         let speed_norm = speed.min(100).max(10);
         let command = format!("go {} {} {} {}", x_norm, y_norm, z_norm, speed_norm);
         println!("{}", command);
-        self.send_command(command.into()).await
+        self.send_command(command.into()).await.and_then(|_| {
+            if x_dir {
+                self.odometry.forward(x_norm.abs() as u32);
+            } else {
+                self.odometry.back(x_norm.abs() as u32);
+            }
+            if y_dir {
+                self.odometry.right(y_norm.abs() as u32);
+            } else {
+                self.odometry.left(y_norm.abs() as u32);
+            }
+            if z_dir {
+                self.odometry.up(z_norm.abs() as u32);
+            } else {
+                self.odometry.down(z_norm.abs() as u32);
+            }
+            Ok(())
+        })
     }
 
     /// Moves in a curve parsing the first point to the second point in the shortest path.
@@ -470,26 +497,56 @@ impl CommandMode {
     /// the minimal distance to go is 0 or 20cm on `x`,`y`,`z`
     pub async fn curve(
         &mut self,
-        x1: u32,
-        y1: u32,
-        z1: u32,
-        x2: u32,
-        y2: u32,
-        z2: u32,
+        x1: i32,
+        y1: i32,
+        z1: i32,
+        x2: i32,
+        y2: i32,
+        z2: i32,
         speed: u8,
     ) -> Result<(), String> {
-        let x1_norm = (x1 == 0).then(|| 0).unwrap_or(x1.min(500).max(20));
-        let y1_norm = (y1 == 0).then(|| 0).unwrap_or(y1.min(500).max(20));
-        let z1_norm = (z1 == 0).then(|| 0).unwrap_or(z1.min(500).max(20));
-        let x2_norm = (x2 == 0).then(|| 0).unwrap_or(x2.min(500).max(20));
-        let y2_norm = (y2 == 0).then(|| 0).unwrap_or(y2.min(500).max(20));
-        let z2_norm = (z2 == 0).then(|| 0).unwrap_or(z2.min(500).max(20));
+        let x1_dir = x1 > 0;
+        let y1_dir = y1 > 0;
+        let z1_dir = z1 > 0;
+        let x2_dir = x2 > 0;
+        let y2_dir = y2 > 0;
+        let z2_dir = z2 > 0;
+
+        let mut x1_norm = (x1 == 0).then(|| 0).unwrap_or(x1.min(500).max(20));
+        x1_norm = x1_dir.then(|| x1_norm).unwrap_or(x1_norm * -1);
+        let mut y1_norm = (y1 == 0).then(|| 0).unwrap_or(y1.min(500).max(20));
+        y1_norm = y1_dir.then(|| y1_norm).unwrap_or(y1_norm * -1);
+        let mut z1_norm = (z1 == 0).then(|| 0).unwrap_or(z1.min(500).max(20));
+        z1_norm = z1_dir.then(|| z1_norm).unwrap_or(z1_norm * -1);
+        let mut x2_norm = (x2 == 0).then(|| 0).unwrap_or(x2.min(500).max(20));
+        x2_norm = x2_dir.then(|| x2_norm).unwrap_or(x2_norm * -1);
+        let mut y2_norm = (y2 == 0).then(|| 0).unwrap_or(y2.min(500).max(20));
+        y2_norm = y2_dir.then(|| y2_norm).unwrap_or(y2_norm * -1);
+        let mut z2_norm = (z2 == 0).then(|| 0).unwrap_or(z2.min(500).max(20));
+        z2_norm = z2_dir.then(|| z2_norm).unwrap_or(z2_norm * -1);
         let speed_norm = speed.min(100).max(10);
         let command = format!(
             "curve {} {} {} {} {} {} {}",
             x1_norm, y1_norm, z1_norm, x2_norm, y2_norm, z2_norm, speed_norm
         );
-        self.send_command(command.into()).await
+        self.send_command(command.into()).await.and_then(|_| {
+            if x2_dir {
+                self.odometry.forward(x2_norm.abs() as u32);
+            } else {
+                self.odometry.back(x2_norm.abs() as u32);
+            }
+            if y2_dir {
+                self.odometry.right(y2_norm.abs() as u32);
+            } else {
+                self.odometry.left(y2_norm.abs() as u32);
+            }
+            if z2_dir {
+                self.odometry.up(z2_norm.abs() as u32);
+            } else {
+                self.odometry.down(z2_norm.abs() as u32);
+            }
+            Ok(())
+        })
     }
 
     /// set the speed for the forward, backward, right, left, up, down motion

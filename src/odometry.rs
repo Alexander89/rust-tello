@@ -12,6 +12,13 @@ impl Odometry {
         self.y += x * self.rot.sin() + y * self.rot.cos();
     }
 
+    pub fn reset(&mut self) -> () {
+        self.x = 0.0;
+        self.y = 0.0;
+        self.z = 0.0;
+        self.rot = 0.0;
+    }
+
     pub fn up(&mut self, z: u32) -> () {
         self.z += z.max(20).min(500) as f64;
     }
